@@ -1,0 +1,25 @@
+// Definición de pines
+const int pwmPin = 2;
+const int LED_SOLAR = 3;
+
+void setup() {
+  // Configurar los pines como salidas
+  pinMode(pwmPin, OUTPUT);
+  pinMode(LED_SOLAR, OUTPUT);
+}
+
+void loop() {
+  // Encender los pines
+  digitalWrite(pwmPin, HIGH);
+  digitalWrite(LED_SOLAR, HIGH);
+
+  // Esperar 5 segundos
+  delay(5000);
+
+  // Apagar los pines
+  digitalWrite(pwmPin, LOW);
+  digitalWrite(LED_SOLAR, LOW);
+
+  // Esperar 5 segundos
+  delay(5000);
+}
