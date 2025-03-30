@@ -119,7 +119,13 @@ void setup() {
   pinMode(LED_SOLAR, OUTPUT);
   digitalWrite(LOAD_CONTROL_PIN, HIGH);
   // digitalWrite(LED_SOLAR, LOW);
-
+  // Parpadeo de prueba antes de iniciar todo lo demás
+  for(int i=0; i<2; i++) {
+    digitalWrite(LED_SOLAR, HIGH);
+    delay(100);
+    digitalWrite(LED_SOLAR, LOW);
+    delay(100);
+  }
   pinMode(TEMP_PIN, INPUT);
 
   // Configuración del watchdog
@@ -206,6 +212,15 @@ void setup() {
 
   // Iniciar el servidor web
   initWebServer();
+  pinMode(LED_SOLAR, OUTPUT); // Justo antes del segundo parpadeo
+  // Parpadeo de prueba antes de iniciar todo lo demás
+  for(int i=0; i<10; i++) {
+    digitalWrite(LED_SOLAR, HIGH);
+    delay(50);
+    digitalWrite(LED_SOLAR, LOW);
+    delay(50);
+  }
+
 }
 
 void loop() {
