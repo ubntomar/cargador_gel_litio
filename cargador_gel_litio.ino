@@ -15,7 +15,8 @@ Preferences preferences;
 
 // Pines de control
 #define LOAD_CONTROL_PIN 7
-#define LED_SOLAR 3
+
+const int LED_SOLAR = 3;
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);
@@ -117,7 +118,7 @@ void setup() {
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   pinMode(LED_SOLAR, OUTPUT);
   digitalWrite(LOAD_CONTROL_PIN, HIGH);
-  digitalWrite(LED_SOLAR, LOW);
+  // digitalWrite(LED_SOLAR, LOW);
 
   pinMode(TEMP_PIN, INPUT);
 
@@ -374,7 +375,6 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   if (batteryVoltage >= 14.8) {
     currentState = ERROR;
     Serial.println("ERROR: Voltaje de batería demasiado alto");
-    return;
   }
 
   switch (currentState) {
@@ -450,16 +450,17 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
 
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-      setPWM(0);
       Serial.println("Estado de error detectado. Reiniciando el sistema.");
-      if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
+      setPWM(100);
+      if (true) { //temperature >= TEMP_THRESHOLD_SHUTDOWN
         Serial.println("Dejamos cortado el paso de corriente a través de Mosfets.");
         while(true) {
-          delay(500);
-          digitalWrite(LED_SOLAR, LOW);
-          delay(500);
+          Serial.println("blin");
           digitalWrite(LED_SOLAR, HIGH);
-          delay(500);
+          delay(1000);
+          Serial.println("king");
+          digitalWrite(LED_SOLAR, LOW);
+          delay(1000);
           esp_task_wdt_reset();  // Reset para evitar reinicio
         }
       }
