@@ -30,6 +30,10 @@ const int pwmResolution = 8;
 const int numSamples = 20;
 float maxAllowedCurrent = 6000.0;
 
+//Máximo voltaje de batería
+const float maxBatteryVoltage = 14.8;
+
+
 // Parámetros de carga para baterías de gel
 float bulkVoltage = 14.4;
 float absorptionVoltage = 14.4;
@@ -116,6 +120,7 @@ void setup() {
   // Pines de control
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   pinMode(LED_SOLAR, OUTPUT);
+  Serial.println("Configurando pin LOAD_CONTROL_PIN  ...");
   digitalWrite(LOAD_CONTROL_PIN, HIGH);
   digitalWrite(LED_SOLAR, LOW);
 
@@ -256,10 +261,10 @@ void loop() {
   // Control de voltaje (LVD y LVR)
   if (voltageBatterySensor2 < LVD) {
     digitalWrite(LOAD_CONTROL_PIN, LOW);
-    Serial.println("Desactivando el sistema (voltaje < LVD)");
+    Serial.println("Desactivando el sistema (voltaje < LVD)  :LOAD_CONTROL_PIN, LOW");
   } else if (voltageBatterySensor2 > LVR) {
     digitalWrite(LOAD_CONTROL_PIN, HIGH);
-    Serial.println("Reactivando el sistema (voltaje > LVR)");
+    Serial.println("Reactivando el sistema (voltaje > LVR)   :LOAD_CONTROL_PIN, HIGH");
   }
 
   // RE-ENTRY CHECK
@@ -372,7 +377,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   float batteryNetCurrent;
   float batteryNetCurrentAmps;
   float initialSOC = 0.0;
-  if (batteryVoltage >= 14.8) {
+  if (batteryVoltage >= maxBatteryVoltage) {
     currentState = ERROR;
     Serial.println("ERROR: Voltaje de batería demasiado alto");
     //return;
@@ -453,7 +458,9 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       digitalWrite(LOAD_CONTROL_PIN, LOW);
       setPWM(0);
       Serial.println("Estado de error detectado. Reiniciando el sistema.");
-      if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
+      if (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
+          batteryVoltage >= maxBatteryVoltage ) {
+        Serial.println("Temperatura o voltaje de batería excesivo. Desactivando carga.");
         Serial.println("Dejamos cortado el paso de corriente a través de Mosfets.");
         while(true) {
           delay(500);
