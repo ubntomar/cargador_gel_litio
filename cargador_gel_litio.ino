@@ -375,6 +375,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   if (batteryVoltage >= 14.8) {
     currentState = ERROR;
     Serial.println("ERROR: Voltaje de batería demasiado alto");
+    //return;
   }
 
   switch (currentState) {
