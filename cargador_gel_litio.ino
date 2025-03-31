@@ -15,8 +15,7 @@ Preferences preferences;
 
 // Pines de control
 #define LOAD_CONTROL_PIN 7
-
-const int LED_SOLAR = 3;
+#define LED_SOLAR 3
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);
@@ -118,14 +117,8 @@ void setup() {
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   pinMode(LED_SOLAR, OUTPUT);
   digitalWrite(LOAD_CONTROL_PIN, HIGH);
-  // digitalWrite(LED_SOLAR, LOW);
-  // Parpadeo de prueba antes de iniciar todo lo demás
-  for(int i=0; i<2; i++) {
-    digitalWrite(LED_SOLAR, HIGH);
-    delay(100);
-    digitalWrite(LED_SOLAR, LOW);
-    delay(100);
-  }
+  digitalWrite(LED_SOLAR, LOW);
+
   pinMode(TEMP_PIN, INPUT);
 
   // Configuración del watchdog
@@ -212,15 +205,6 @@ void setup() {
 
   // Iniciar el servidor web
   initWebServer();
-  pinMode(LED_SOLAR, OUTPUT); // Justo antes del segundo parpadeo
-  // Parpadeo de prueba antes de iniciar todo lo demás
-  for(int i=0; i<10; i++) {
-    digitalWrite(LED_SOLAR, HIGH);
-    delay(50);
-    digitalWrite(LED_SOLAR, LOW);
-    delay(50);
-  }
-
 }
 
 void loop() {
@@ -316,6 +300,7 @@ void loop() {
   Serial.println("Voltaje Panel: " + String(ina219_1.getBusVoltage_V()) + " V");
   Serial.println("Voltaje Batería: " + String(ina219_2.getBusVoltage_V()) + " V");
   Serial.println("Estado: " + getChargeStateString(currentState));
+  Serial.println("pwmValue: " + String(currentPWM));
   handleWebServer();
 
   delay(1000);
@@ -465,17 +450,16 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
 
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
+      setPWM(0);
       Serial.println("Estado de error detectado. Reiniciando el sistema.");
-      setPWM(100);
-      if (true) { //temperature >= TEMP_THRESHOLD_SHUTDOWN
+      if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
         Serial.println("Dejamos cortado el paso de corriente a través de Mosfets.");
         while(true) {
-          Serial.println("blin");
-          digitalWrite(LED_SOLAR, HIGH);
-          delay(1000);
-          Serial.println("king");
+          delay(500);
           digitalWrite(LED_SOLAR, LOW);
-          delay(1000);
+          delay(500);
+          digitalWrite(LED_SOLAR, HIGH);
+          delay(500);
           esp_task_wdt_reset();  // Reset para evitar reinicio
         }
       }
