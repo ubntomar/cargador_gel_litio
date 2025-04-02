@@ -457,24 +457,15 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
       setPWM(0);
-      Serial.println("Estado de error detectado. Reiniciando el sistema.");
-      if (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
+      while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
           batteryVoltage >= maxBatteryVoltage ) {
-        Serial.println("Temperatura o voltaje de batería excesivo. Desactivando carga.");
-        Serial.println("Dejamos cortado el paso de corriente a través de Mosfets.");
-        while(true) {
-          delay(500);
+          pinMode(LED_SOLAR, OUTPUT);
+          delay(100);
           digitalWrite(LED_SOLAR, LOW);
-          delay(500);
+          delay(100);
           digitalWrite(LED_SOLAR, HIGH);
-          delay(500);
+          delay(100);
           esp_task_wdt_reset();  // Reset para evitar reinicio
-        }
-      }
-      else {
-        Serial.println("Error en el sistema de carga.");
-        Serial.println("No es un error tan grave, vamos a dejar que el watchdog reinicie el ESP32.");
-        while (true);
       }
       break;
   }
