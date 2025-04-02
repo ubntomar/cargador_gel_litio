@@ -31,7 +31,7 @@ const int numSamples = 20;
 float maxAllowedCurrent = 6000.0;
 
 //Máximo voltaje de batería
-const float maxBatteryVoltage = 14.8;
+const float maxBatteryVoltageAllowed = 14.8;
 
 
 // Parámetros de carga para baterías de gel
@@ -120,8 +120,9 @@ void setup() {
   // Pines de control
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   pinMode(LED_SOLAR, OUTPUT);
-  Serial.println("Configurando pin LOAD_CONTROL_PIN  ...");
-  digitalWrite(LOAD_CONTROL_PIN, HIGH);
+  
+  
+  
   digitalWrite(LED_SOLAR, LOW);
 
   pinMode(TEMP_PIN, INPUT);
@@ -182,6 +183,13 @@ void setup() {
   } else {
     currentState = BULK_CHARGE;
     Serial.println("Batería requiere carga - iniciando en BULK_CHARGE");
+  }
+
+  if(initialBatteryVoltage>=12.0){
+    digitalWrite(LOAD_CONTROL_PIN, HIGH);
+  } else{
+    digitalWrite(LOAD_CONTROL_PIN, LOW);
+
   }
 
   // Configurar el punto de acceso
@@ -259,12 +267,12 @@ void loop() {
   }
 
   // Control de voltaje (LVD y LVR)
-  if (voltageBatterySensor2 < LVD) {
+  if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
     digitalWrite(LOAD_CONTROL_PIN, LOW);
-    Serial.println("Desactivando el sistema (voltaje < LVD)  :LOAD_CONTROL_PIN, LOW");
-  } else if (voltageBatterySensor2 > LVR) {
+    Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)  :LOAD_CONTROL_PIN, LOW");
+  } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed   ) {
     digitalWrite(LOAD_CONTROL_PIN, HIGH);
-    Serial.println("Reactivando el sistema (voltaje > LVR)   :LOAD_CONTROL_PIN, HIGH");
+    Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)   :LOAD_CONTROL_PIN, HIGH");
   }
 
   // RE-ENTRY CHECK
@@ -377,7 +385,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   float batteryNetCurrent;
   float batteryNetCurrentAmps;
   float initialSOC = 0.0;
-  if (batteryVoltage >= maxBatteryVoltage) {
+  if (batteryVoltage >= maxBatteryVoltageAllowed) {
     currentState = ERROR;
     Serial.println("ERROR: Voltaje de batería demasiado alto");
     //return;
@@ -458,7 +466,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       digitalWrite(LOAD_CONTROL_PIN, LOW);
       setPWM(0);
       while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
-          batteryVoltage >= maxBatteryVoltage ) {
+          batteryVoltage >= maxBatteryVoltageAllowed ) {
           pinMode(LED_SOLAR, OUTPUT);
           delay(100);
           digitalWrite(LED_SOLAR, LOW);
@@ -466,7 +474,9 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
           digitalWrite(LED_SOLAR, HIGH);
           delay(100);
           esp_task_wdt_reset();  // Reset para evitar reinicio
+          batteryVoltage = ina219_2.getBusVoltage_V();
       }
+      currentState =ABSORPTION_CHARGE;
       break;
   }
 }
