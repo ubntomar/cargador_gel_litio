@@ -31,7 +31,7 @@ const int numSamples = 20;
 float maxAllowedCurrent = 6000.0;
 
 //Máximo voltaje de batería
-const float maxBatteryVoltageAllowed = 14.8;
+const float maxBatteryVoltageAllowed = 15.0;
 
 
 // Parámetros de carga para baterías de gel
@@ -53,7 +53,7 @@ unsigned long lastSaveTime = 0;
 const unsigned long SAVE_INTERVAL = 300000;
 
 // Límite máximo de absorción (respaldo)
-const float maxAbsorptionHours = 8.0;
+const float maxAbsorptionHours = 1.0;
 
 // Variables para tracking
 float calculatedAbsorptionHours = 0.0;
@@ -94,7 +94,7 @@ bool isLithium = false;
 #define NUM_SAMPLES 20
 float temperature;
 
-#define TEMP_THRESHOLD_SHUTDOWN 300
+#define TEMP_THRESHOLD_SHUTDOWN 55
 
 float readTemperature();
 void saveChargingState();
