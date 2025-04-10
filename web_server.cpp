@@ -442,7 +442,7 @@ String getData() {
   json += ",";
   json += "\"temperature\": " + String(safeTemperature);
   json += ",";
-  json += "\"temperature\": " + String(safeTemperature);
+  json += "\"notaPersonalizada\": \"" + notaPersonalizada + "\"";
   json += ",";
   json += "\"useFuenteDC\": ";
   json += useFuenteDC ? "true" : "false";
