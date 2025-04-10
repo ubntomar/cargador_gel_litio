@@ -7,7 +7,7 @@
 #include "web_server.h"  // Incluir el archivo del servidor web------
 
 Preferences preferences;
-#define WDT_TIMEOUT 5
+#define WDT_TIMEOUT 10
 
 // Definición de pines I2C
 #define SDA_PIN 8
@@ -113,7 +113,7 @@ void setPWM(int pwmValue);
 String getChargeStateString(ChargeState state);
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   delay(1000);
   Serial.println("Iniciando sensores INA219...");
 
@@ -121,7 +121,7 @@ void setup() {
   pinMode(LOAD_CONTROL_PIN, OUTPUT);
   pinMode(LED_SOLAR, OUTPUT);
   
-  
+  notaPersonalizada = "Sistema iniciado correctamente";
   
   digitalWrite(LED_SOLAR, LOW);
 
@@ -166,7 +166,7 @@ void setup() {
   }
 
   // Iniciar PWM en cero
-  setPWM(0);
+  setPWM(10);
   currentState = BULK_CHARGE;
 
   // Añadir detección inicial del estado de la batería
@@ -209,12 +209,24 @@ void setup() {
   absorptionVoltage = preferences.getFloat("absV", 14.4);
   floatVoltage = preferences.getFloat("floatV", 13.6);
   isLithium = preferences.getBool("isLithium", false);
+  useFuenteDC = preferences.getBool("useFuenteDC", false);
+  fuenteDC_Amps = preferences.getFloat("fuenteDC_Amps", 0.0);
   preferences.end();
 
   // Actualizar absorptionCurrentThreshold
   absorptionCurrentThreshold = (batteryCapacity * thresholdPercentage) * 10;
   factorDivider = 5;
   currentLimitIntoFloatStage = absorptionCurrentThreshold / factorDivider;
+
+
+  // Calcular el tiempo máximo de Bulk si se usa fuente DC y los amperios son > 0
+  if (useFuenteDC && fuenteDC_Amps > 0) {
+    maxBulkHours = batteryCapacity / fuenteDC_Amps;
+    notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
+  } else {
+    maxBulkHours = 0.0;
+    notaPersonalizada = "Usando paneles solares";
+  }
 
   // Iniciar el servidor web
   initWebServer();
@@ -299,6 +311,29 @@ void loop() {
   }
 
   updateChargeState(voltageBatterySensor2, panelToBatteryCurrent);
+
+
+  // Recalcular horas máximas si se usa fuente DC
+  if (useFuenteDC && fuenteDC_Amps > 0) {
+    maxBulkHours = batteryCapacity / fuenteDC_Amps;
+    
+    // Solo actualizar la nota si no estamos en estado de ERROR
+    if (currentState != ERROR) {
+      if (currentState == BULK_CHARGE) {
+        // La nota ya se actualiza en el control de Bulk
+      } else {
+        notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
+      }
+    }
+  } else {
+    maxBulkHours = 0.0;
+    
+    // Solo actualizar la nota si no estamos en estado de ERROR
+    if (currentState != ERROR) {
+      notaPersonalizada = "Usando paneles solares";
+    }
+  }
+
 
   temperature = readTemperature();
   Serial.print("Temperatura: ");
@@ -394,13 +429,37 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   switch (currentState) {
     case BULK_CHARGE:
       bulkControl(batteryVoltage, chargeCurrent, bulkVoltage);
+      
+      // Agregar control de tiempo para fuente DC
+      static unsigned long bulkStartTime = 0;
+      if (bulkStartTime == 0) {
+        bulkStartTime = millis();
+      }
+      
+      // Verificar si debemos salir de BULK por voltaje
       if (batteryVoltage >= bulkVoltage) {
         initialSOC = (accumulatedAh / batteryCapacity) * 100.0;
         float socFromVoltage = getSOCFromVoltage(batteryVoltage);
         initialSOC = min(initialSOC, socFromVoltage);
         currentState = ABSORPTION_CHARGE;
         absorptionStartTime = millis();
-        Serial.println("-> Transición a ABSORPTION_CHARGE");
+        bulkStartTime = 0; // Resetear para próximo ciclo
+        Serial.println("-> Transición a ABSORPTION_CHARGE por voltaje");
+      } 
+      // Verificar si debemos salir de BULK por tiempo (solo con fuente DC)
+      else if (useFuenteDC && fuenteDC_Amps > 0 && maxBulkHours > 0) {
+        unsigned long currentBulkHours = (millis() - bulkStartTime) / 3600000.0;
+        
+        // Actualizar nota con tiempo transcurrido
+        notaPersonalizada = "Bulk: " + String(currentBulkHours, 1) + "h de " + String(maxBulkHours, 1) + "h máx";
+        
+        if (currentBulkHours >= maxBulkHours) {
+          currentState = FLOAT_CHARGE;
+          absorptionStartTime = millis();
+          bulkStartTime = 0; // Resetear para próximo ciclo
+          notaPersonalizada = "Transición a FLOAT_CHARGE por tiempo máximo";
+          Serial.println("-> Transición a FLOAT_CHARGE por tiempo máximo en BULK");
+        }
       }
       break;
 
@@ -464,7 +523,8 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
 
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-      setPWM(0);
+      setPWM(20);
+      notaPersonalizada = "estoy en la sección Error"; 
       while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
           batteryVoltage >= maxBatteryVoltageAllowed ) {
           pinMode(LED_SOLAR, OUTPUT);

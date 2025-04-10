@@ -4,7 +4,36 @@
 WebServer server(80);
 extern Preferences preferences;
 
+// Variable global para almacenar el color aleatorio
+String randomStateColor = "";
+
+// Variable para almacenar la nota
+String notaPersonalizada = "";
+
+
+bool useFuenteDC = false;
+float fuenteDC_Amps = 0.0;
+float maxBulkHours = 0.0;
+
+
+// Función para generar un color hexadecimal aleatorio
+String generateRandomColor() {
+  uint32_t randomNum = esp_random(); // Usa la función de generación de números aleatorios del ESP32
+  
+  // Crea un color hexadecimal usando el número aleatorio generado
+  char colorBuffer[8];
+  sprintf(colorBuffer, "#%06X", (randomNum & 0xFFFFFF)); // Extraemos los últimos 6 dígitos para el código de color
+  
+  return String(colorBuffer);
+}
+
+
+
 void initWebServer() {
+
+  // Genera un color aleatorio al inicializar el servidor web
+  randomStateColor = generateRandomColor(); 
+
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/html", getHTML());
   });
@@ -30,7 +59,9 @@ void initWebServer() {
       absorptionVoltage = server.arg("absorptionVoltage").toFloat();
       floatVoltage = server.arg("floatVoltage").toFloat();
       isLithium = server.arg("isLithium") == "true";
-
+      useFuenteDC = server.arg("powerSource") == "true";
+      fuenteDC_Amps = server.arg("fuenteDC_Amps").toFloat();
+      
       absorptionCurrentThreshold = (batteryCapacity * thresholdPercentage) * 10;
       currentLimitIntoFloatStage = absorptionCurrentThreshold / factorDivider;
 
@@ -42,6 +73,8 @@ void initWebServer() {
       preferences.putFloat("absV", absorptionVoltage);
       preferences.putFloat("floatV", floatVoltage);
       preferences.putBool("isLithium", isLithium);
+      preferences.putBool("useFuenteDC", useFuenteDC);
+      preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
       preferences.end();
 
       server.sendHeader("Location", "/");
@@ -81,7 +114,8 @@ String getHTML() {
   html += ".form-group input[type='submit'] { background-color: #4CAF50; color: white; border: none; cursor: pointer; }";
   html += ".form-group input[type='submit']:hover { background-color: #45a049; }";
   html += ".changed { background-color: #d7ffd7; transition: background-color 1s ease; }";
-  
+  html += "#chargeStateLabel { color: " + randomStateColor + "; font-weight: bold; }"; // Añadir color aleatorio para "Estado de Carga"
+
   // Estilos para dispositivos móviles
   html += "@media (max-width: 600px) {";
   html += "  .form-group input, .form-group select { font-size: 16px; padding: 10px; }";
@@ -107,7 +141,7 @@ String getHTML() {
   html += "<tr><td>Corriente Batería a Carga (mA)</td><td id='batteryToLoadCurrent'>-</td></tr>";
   html += "<tr><td>Voltaje Panel</td><td id='voltagePanel'>-</td></tr>";
   html += "<tr><td>Voltaje Batería</td><td id='voltageBatterySensor2'>-</td></tr>";
-  html += "<tr><td>Estado de Carga</td><td id='chargeState'>-</td></tr>";
+  html += "<tr><td id='chargeStateLabel'>Estado de Carga</td><td id='chargeState'>-</td></tr>"; // Añadimos un ID para aplicar el estilo
   html += "<tr><td>Voltaje Etapa BULK</td><td id='bulkVoltage'>-</td></tr>";
   html += "<tr><td>Voltaje Etapa ABSORCIÓN</td><td id='absorptionVoltage'>-</td></tr>";
   html += "<tr><td>Voltaje Etapa FLOTACIÓN(GEL)</td><td id='floatVoltage'>-</td></tr>";
@@ -125,6 +159,10 @@ String getHTML() {
   html += "<tr><td>Límite de corriente en float (mA)</td><td id='currentLimitIntoFloatStage'>-</td></tr>";
   html += "<tr><td>Tipo de Batería</td><td id='isLithium'>-</td></tr>";
   html += "<tr><td>Temperatura</td><td id='temperature'>-</td></tr>";
+  html += "<tr><td>Nota</td><td id='notaPersonalizada'>" + notaPersonalizada + "</td></tr>";
+  html += "<tr><td>Fuente de Energía</td><td id='powerSource_display'>-</td></tr>";
+  html += "<tr><td>Amperios Fuente DC</td><td id='fuenteDC_Amps_display'>-</td></tr>";
+  html += "<tr><td>Horas máx. en Bulk</td><td id='maxBulkHours'>-</td></tr>";
   html += "</table>";
   html += "</div>";
   html += "<h2>Configuración</h2>";
@@ -162,6 +200,18 @@ String getHTML() {
   html += "</select>";
   html += "</div>";
   html += "<div class='form-group'>";
+  html += "<label for='powerSource'>Fuente de Energía:</label>";
+  html += "<select id='powerSource' name='powerSource' required>";
+  html += "<option value='false'" + String(useFuenteDC ? "" : " selected") + ">Panel Solar</option>";
+  html += "<option value='true'" + String(useFuenteDC ? " selected" : "") + ">Fuente DC</option>";
+  html += "</select>";
+  html += "</div>";
+
+  html += "<div class='form-group' id='fuenteDC_container' " + String(useFuenteDC ? "" : "style='display:none;'") + ">";
+  html += "<label for='fuenteDC_Amps'>Amperios de Fuente DC:</label>";
+  html += "<input type='number' id='fuenteDC_Amps' name='fuenteDC_Amps' step='0.1' min='0' value='" + String(fuenteDC_Amps) + "'>";
+  html += "</div>";
+  html += "<div class='form-group'>";
   html += "<input type='submit' value='Actualizar'>";
   html += "</div>";
   html += "</form>";
@@ -169,6 +219,19 @@ String getHTML() {
   html += "</div>";
   html += "<script>";
   
+
+  // Añadir después de la inicialización de campos:
+  html += "  // Mostrar/ocultar campo de amperios DC según selección";
+  html += "  const powerSourceSelect = document.getElementById('powerSource');";
+  html += "  const fuenteDC_container = document.getElementById('fuenteDC_container');";
+  html += "  powerSourceSelect.addEventListener('change', function() {";
+  html += "    if (this.value === 'true') {";
+  html += "      fuenteDC_container.style.display = 'block';";
+  html += "    } else {";
+  html += "      fuenteDC_container.style.display = 'none';";
+  html += "    }";
+  html += "  });";
+
   // Función updateData mejorada
   html += "function updateData() {";
   html += "  fetch('/data')";
@@ -202,6 +265,7 @@ String getHTML() {
   html += "      updateField('currentLimitIntoFloatStage', data.currentLimitIntoFloatStage);";
   html += "      updateField('isLithium', data.isLithium ? 'Litio' : 'GEL');";
   html += "      updateField('temperature', data.temperature);";
+  html += "      updateField('notaPersonalizada', data.notaPersonalizada);";
   html += "    })";
   html += "    .catch(error => {";
   html += "      console.error('Error al obtener datos:', error);";
@@ -385,6 +449,15 @@ String getData() {
   json += isLithium ? "true" : "false";
   json += ",";
   json += "\"temperature\": " + String(safeTemperature);
+  json += ",";
+  json += "\"notaPersonalizada\": \"" + notaPersonalizada + "\"";
+  json += ",";
+  json += "\"useFuenteDC\": ";
+  json += useFuenteDC ? "true" : "false";
+  json += ",";
+  json += "\"fuenteDC_Amps\": " + String(fuenteDC_Amps);
+  json += ",";
+  json += "\"maxBulkHours\": " + String(maxBulkHours);
   json += "}";
   
   // Log para depuración

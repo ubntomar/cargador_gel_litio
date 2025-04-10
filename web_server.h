@@ -5,6 +5,10 @@
 #include <Adafruit_INA219.h>
 
 extern WebServer server;
+extern String notaPersonalizada;
+extern bool useFuenteDC;
+extern float fuenteDC_Amps;
+extern float maxBulkHours;
 
 // Estados de carga (debe coincidir con la definición en el archivo principal)
 enum ChargeState {
