@@ -60,6 +60,8 @@ float calculatedAbsorptionHours = 0.0;
 unsigned long absorptionStartTime = 0;
 
 
+unsigned long bulkStartTime = 0;
+
 
 ChargeState currentState = BULK_CHARGE;
 
@@ -211,6 +213,7 @@ void setup() {
   isLithium = preferences.getBool("isLithium", false);
   useFuenteDC = preferences.getBool("useFuenteDC", false);
   fuenteDC_Amps = preferences.getFloat("fuenteDC_Amps", 0.0);
+  bulkStartTime = preferences.getULong("bulkStartTime", 0);
   preferences.end();
 
   // Actualizar absorptionCurrentThreshold
@@ -358,6 +361,7 @@ void saveChargingState() {
   if (millis() - lastSaveTime > SAVE_INTERVAL) {
     preferences.begin("charger", false);
     preferences.putFloat("accumulatedAh", accumulatedAh);
+    preferences.putULong("bulkStartTime", bulkStartTime);
     preferences.end();
     lastSaveTime = millis();
   }
@@ -431,9 +435,12 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       bulkControl(batteryVoltage, chargeCurrent, bulkVoltage);
       
       // Agregar control de tiempo para fuente DC
-      static unsigned long bulkStartTime = 0;
       if (bulkStartTime == 0) {
         bulkStartTime = millis();
+        // Guardar inmediatamente el valor inicial
+        preferences.begin("charger", false);
+        preferences.putULong("bulkStartTime", bulkStartTime);
+        preferences.end();
       }
       
       // Verificar si debemos salir de BULK por voltaje
@@ -444,6 +451,9 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         currentState = ABSORPTION_CHARGE;
         absorptionStartTime = millis();
         bulkStartTime = 0; // Resetear para próximo ciclo
+        preferences.begin("charger", false);
+        preferences.putULong("bulkStartTime", 0);
+        preferences.end();
         Serial.println("-> Transición a ABSORPTION_CHARGE por voltaje");
       } 
       // Verificar si debemos salir de BULK por tiempo (solo con fuente DC)
@@ -454,11 +464,14 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         notaPersonalizada = "Bulk: " + String(currentBulkHours, 1) + "h de " + String(maxBulkHours, 1) + "h máx";
         
         if (currentBulkHours >= maxBulkHours) {
-          currentState = FLOAT_CHARGE;
+          currentState = ABSORPTION_CHARGE;
           absorptionStartTime = millis();
           bulkStartTime = 0; // Resetear para próximo ciclo
-          notaPersonalizada = "Transición a FLOAT_CHARGE por tiempo máximo";
-          Serial.println("-> Transición a FLOAT_CHARGE por tiempo máximo en BULK");
+          preferences.begin("charger", false);
+          preferences.putULong("bulkStartTime", 0);
+          preferences.end();
+          notaPersonalizada = "Transición a ABSORPTION_CHARGE por tiempo máximo";
+          Serial.println("-> Transición a ABSORPTION_CHARGE por tiempo máximo en BULK");
         }
       }
       break;

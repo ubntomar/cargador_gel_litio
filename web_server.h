@@ -44,6 +44,8 @@ extern Adafruit_INA219 ina219_1;
 extern Adafruit_INA219 ina219_2;
 extern ChargeState currentState;
 
+extern unsigned long bulkStartTime;
+
 // Declaración de funciones
 void initWebServer();
 void handleWebServer();
