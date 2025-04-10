@@ -206,8 +206,7 @@ String getHTML() {
   html += "<option value='true'" + String(useFuenteDC ? " selected" : "") + ">Fuente DC</option>";
   html += "</select>";
   html += "</div>";
-
-  html += "<div class='form-group' id='fuenteDC_container' " + String(useFuenteDC ? "" : "style='display:none;'") + ">";
+  html += "<div class='form-group' id='fuenteDC_container' " + String(useFuenteDC ? "" : "style='display:block;'") + ">";
   html += "<label for='fuenteDC_Amps'>Amperios de Fuente DC:</label>";
   html += "<input type='number' id='fuenteDC_Amps' name='fuenteDC_Amps' step='0.1' min='0' value='" + String(fuenteDC_Amps) + "'>";
   html += "</div>";
@@ -220,17 +219,7 @@ String getHTML() {
   html += "<script>";
   
 
-  // Añadir después de la inicialización de campos:
-  html += "  // Mostrar/ocultar campo de amperios DC según selección";
-  html += "  const powerSourceSelect = document.getElementById('powerSource');";
-  html += "  const fuenteDC_container = document.getElementById('fuenteDC_container');";
-  html += "  powerSourceSelect.addEventListener('change', function() {";
-  html += "    if (this.value === 'true') {";
-  html += "      fuenteDC_container.style.display = 'block';";
-  html += "    } else {";
-  html += "      fuenteDC_container.style.display = 'none';";
-  html += "    }";
-  html += "  });";
+ 
 
   // Función updateData mejorada
   html += "function updateData() {";
@@ -453,7 +442,7 @@ String getData() {
   json += ",";
   json += "\"temperature\": " + String(safeTemperature);
   json += ",";
-  json += "\"notaPersonalizada\": \"" + notaPersonalizada + "\"";
+  json += "\"temperature\": " + String(safeTemperature);
   json += ",";
   json += "\"useFuenteDC\": ";
   json += useFuenteDC ? "true" : "false";
