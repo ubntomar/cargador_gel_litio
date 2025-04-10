@@ -266,6 +266,9 @@ String getHTML() {
   html += "      updateField('isLithium', data.isLithium ? 'Litio' : 'GEL');";
   html += "      updateField('temperature', data.temperature);";
   html += "      updateField('notaPersonalizada', data.notaPersonalizada);";
+  html += "      updateField('powerSource_display', data.useFuenteDC ? 'Fuente DC' : 'Panel Solar');";
+  html += "      updateField('fuenteDC_Amps_display', data.fuenteDC_Amps);";
+  html += "      updateField('maxBulkHours', data.maxBulkHours);";
   html += "    })";
   html += "    .catch(error => {";
   html += "      console.error('Error al obtener datos:', error);";
