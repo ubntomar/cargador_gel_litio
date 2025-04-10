@@ -62,8 +62,8 @@ void initWebServer() {
       useFuenteDC = server.arg("powerSource") == "true";
       fuenteDC_Amps = server.arg("fuenteDC_Amps").toFloat();
       
-      absorptionCurrentThreshold = (batteryCapacity * thresholdPercentage) * 10;
-      currentLimitIntoFloatStage = absorptionCurrentThreshold / factorDivider;
+      absorptionCurrentThreshold_mA = (batteryCapacity * thresholdPercentage) * 10;
+      currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
 
       preferences.begin("charger", false);
       preferences.putFloat("batteryCap", batteryCapacity);
@@ -148,7 +148,7 @@ String getHTML() {
   html += "<tr><td>PWM Actual</td><td id='currentPWM'>-</td></tr>";
   html += "<tr><td>LVD</td><td id='LVD'>-</td></tr>";
   html += "<tr><td>LVR</td><td id='LVR'>-</td></tr>";
-  html += "<tr><td>Umbral de Corriente (mA)</td><td id='absorptionCurrentThreshold'>-</td></tr>";
+  html += "<tr><td>Umbral de Corriente (mA)</td><td id='absorptionCurrentThreshold_mA'>-</td></tr>";
   html += "<tr><td>Capacidad de la Batería (Ah)</td><td id='batteryCapacity'>-</td></tr>";
   html += "<tr><td>Umbral de Corriente (%)</td><td id='thresholdPercentage'>-</td></tr>";
   html += "<tr><td>Tiempo Calculado de Absorción (horas)</td><td id='calculatedAbsorptionHours'>-</td></tr>";
@@ -243,7 +243,7 @@ String getHTML() {
   html += "      updateField('currentPWM', data.currentPWM);";
   html += "      updateField('LVD', data.LVD);";
   html += "      updateField('LVR', data.LVR);";
-  html += "      updateField('absorptionCurrentThreshold', data.absorptionCurrentThreshold);";
+  html += "      updateField('absorptionCurrentThreshold_mA', data.absorptionCurrentThreshold_mA);";
   html += "      updateField('batteryCapacity', data.batteryCapacity);";
   html += "      updateField('thresholdPercentage', data.thresholdPercentage);";
   html += "      updateField('calculatedAbsorptionHours', data.calculatedAbsorptionHours);";
@@ -405,7 +405,7 @@ String getData() {
   float safeBulkVoltage = max(0.0f, bulkVoltage);
   float safeAbsorptionVoltage = max(0.0f, absorptionVoltage);
   float safeFloatVoltage = max(0.0f, floatVoltage);
-  float safeAbsorptionCurrentThreshold = max(0.0f, absorptionCurrentThreshold);
+  float safeabsorptionCurrentThreshold_mA = max(0.0f, absorptionCurrentThreshold_mA);
   float safeBatteryCapacity = max(0.0f, batteryCapacity);
   float safeThresholdPercentage = max(0.0f, thresholdPercentage);
   float safeCalculatedAbsorptionHours = max(0.0f, calculatedAbsorptionHours);
@@ -428,7 +428,7 @@ String getData() {
   json += "\"currentPWM\": " + String(currentPWM) + ",";
   json += "\"LVD\": " + String(LVD) + ",";
   json += "\"LVR\": " + String(LVR) + ",";
-  json += "\"absorptionCurrentThreshold\": " + String(safeAbsorptionCurrentThreshold) + ",";
+  json += "\"absorptionCurrentThreshold_mA\": " + String(safeabsorptionCurrentThreshold_mA) + ",";
   json += "\"batteryCapacity\": " + String(safeBatteryCapacity) + ",";
   json += "\"thresholdPercentage\": " + String(safeThresholdPercentage) + ",";
   json += "\"calculatedAbsorptionHours\": " + String(safeCalculatedAbsorptionHours) + ",";
@@ -442,7 +442,10 @@ String getData() {
   json += ",";
   json += "\"temperature\": " + String(safeTemperature);
   json += ",";
-  json += "\"notaPersonalizada\": \"" + notaPersonalizada + "\"";
+  // Sanitizar notaPersonalizada para evitar problemas con JSON
+  String sanitizedNota = notaPersonalizada;
+  sanitizedNota.replace("\"", "\\\""); // Escapar comillas dobles
+  json += "\"notaPersonalizada\": \"" + sanitizedNota + "\"";
   json += ",";
   json += "\"useFuenteDC\": ";
   json += useFuenteDC ? "true" : "false";

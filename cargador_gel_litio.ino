@@ -39,7 +39,7 @@ float bulkVoltage = 14.4;
 float absorptionVoltage = 14.4;
 float floatVoltage = 13.6;
 
-float absorptionCurrentThreshold = 350.0;
+float absorptionCurrentThreshold_mA = 350.0;
 float currentLimitIntoFloatStage = 100.0;
 int factorDivider;
 
@@ -216,10 +216,10 @@ void setup() {
   bulkStartTime = preferences.getULong("bulkStartTime", 0);
   preferences.end();
 
-  // Actualizar absorptionCurrentThreshold
-  absorptionCurrentThreshold = (batteryCapacity * thresholdPercentage) * 10;
+  // Actualizar absorptionCurrentThreshold_mA
+  absorptionCurrentThreshold_mA = (batteryCapacity * thresholdPercentage) * 10;
   factorDivider = 5;
-  currentLimitIntoFloatStage = absorptionCurrentThreshold / factorDivider;
+  currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
 
 
   // Calcular el tiempo máximo de Bulk si se usa fuente DC y los amperios son > 0
@@ -436,7 +436,10 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       
       // Agregar control de tiempo para fuente DC
       if (bulkStartTime == 0) {
+        // Asegurarse de que bulkStartTime sea inicializado solo una vez al entrar en modo BULK
         bulkStartTime = millis();
+        Serial.println("Inicializado bulkStartTime: " + String(bulkStartTime));
+        
         // Guardar inmediatamente el valor inicial
         preferences.begin("charger", false);
         preferences.putULong("bulkStartTime", bulkStartTime);
@@ -458,7 +461,8 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       } 
       // Verificar si debemos salir de BULK por tiempo (solo con fuente DC)
       else if (useFuenteDC && fuenteDC_Amps > 0 && maxBulkHours > 0) {
-        unsigned long currentBulkHours = (millis() - bulkStartTime) / 3600000.0;
+        // Corregido: asegurar que el cálculo se realiza correctamente como float
+        float currentBulkHours = (float)(millis() - bulkStartTime) / 3600000.0f;
         
         // Actualizar nota con tiempo transcurrido
         notaPersonalizada = "Bulk: " + String(currentBulkHours, 1) + "h de " + String(maxBulkHours, 1) + "h máx";
@@ -495,7 +499,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       }
       Serial.println("Corriente neta en batería: " + String(batteryNetCurrent) + " mA");
       Serial.println("Tiempo de absorción calculado: " + String(calculatedAbsorptionHours) + " horas");
-      if (batteryNetCurrent <= absorptionCurrentThreshold) {
+      if (batteryNetCurrent <= absorptionCurrentThreshold_mA) {
         if (!isLithium) {
           currentState = FLOAT_CHARGE;
           resetChargingCycle();

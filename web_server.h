@@ -26,7 +26,7 @@ extern float batteryCapacity;
 extern float thresholdPercentage;
 extern float maxAllowedCurrent;
 extern bool isLithium;
-extern float absorptionCurrentThreshold;
+extern float absorptionCurrentThreshold_mA;
 extern float currentLimitIntoFloatStage;
 extern int factorDivider;
 extern float bulkVoltage;
