@@ -16,6 +16,13 @@ float fuenteDC_Amps = 0.0;
 float maxBulkHours = 0.0;
 
 
+// Variables para el control de apagado temporal de la carga
+unsigned long loadOffStartTime = 0;
+unsigned long loadOffDuration = 0;
+bool temporaryLoadOff = false;
+
+
+
 // Función para generar un color hexadecimal aleatorio
 String generateRandomColor() {
   uint32_t randomNum = esp_random(); // Usa la función de generación de números aleatorios del ESP32
@@ -27,6 +34,14 @@ String generateRandomColor() {
   return String(colorBuffer);
 }
 
+  void checkLoadOffTimer() {
+    if (temporaryLoadOff && millis() - loadOffStartTime >= loadOffDuration) {
+      // Solo encender si fue apagado por esta funcionalidad y no por otras razones
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      temporaryLoadOff = false;
+      notaPersonalizada = "Carga reactivada automáticamente después del tiempo especificado";
+    }
+  }
 
 
 void initWebServer() {
@@ -84,11 +99,38 @@ void initWebServer() {
     }
   });
 
+
+  server.on("/toggle-load", HTTP_POST, []() {
+    if (server.hasArg("seconds")) {
+      int seconds = server.arg("seconds").toInt();
+      if (seconds > 0 && seconds <= 300) { // Máximo 5 minutos (300 segundos)
+        if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
+          digitalWrite(LOAD_CONTROL_PIN, LOW);
+          temporaryLoadOff = true;
+          loadOffStartTime = millis();
+          loadOffDuration = seconds * 1000; // Convertir a milisegundos
+          notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos";
+        } else {
+          temporaryLoadOff = false; // Asegurarse de que no activemos el temporizador
+          notaPersonalizada = "La carga ya está apagada, no se realizó ninguna acción";
+        }
+      } else {
+        notaPersonalizada = "Tiempo fuera de rango (1-300 segundos)";
+      }
+      server.sendHeader("Location", "/");
+      server.send(303);
+    } else {
+      server.send(400, "text/plain", "Parámetro 'seconds' no proporcionado");
+    }
+  });
+
+
   server.begin();
 }
 
 void handleWebServer() {
   server.handleClient();
+  checkLoadOffTimer();
 }
 
 String getHTML() {
@@ -164,6 +206,16 @@ String getHTML() {
   html += "<tr><td>Amperios Fuente DC</td><td id='fuenteDC_Amps_display'>-</td></tr>";
   html += "<tr><td>Horas máx. en Bulk</td><td id='maxBulkHours'>-</td></tr>";
   html += "</table>";
+  html += "</div>";
+  html += "<h2>Control de Carga</h2>";
+  html += "<div class='form-container'>";
+  html += "<form action='/toggle-load' method='POST'>";
+  html += "<div class='form-group'>";
+  html += "<label for='seconds'>Apagar carga temporalmente (segundos):</label>";
+  html += "<input type='number' id='seconds' name='seconds' min='1' max='300' value='5' required>";
+  html += "<input type='submit' value='Apagar'>";
+  html += "</div>";
+  html += "</form>";
   html += "</div>";
   html += "<h2>Configuración</h2>";
   html += "<div class='form-container'>";

@@ -10,6 +10,11 @@ extern bool useFuenteDC;
 extern float fuenteDC_Amps;
 extern float maxBulkHours;
 
+extern unsigned long loadOffStartTime;
+extern unsigned long loadOffDuration;
+extern bool temporaryLoadOff;
+void checkLoadOffTimer();
+
 // Estados de carga (debe coincidir con la definición en el archivo principal)
 enum ChargeState {
   BULK_CHARGE,
