@@ -10,6 +10,7 @@ extern bool useFuenteDC;
 extern float fuenteDC_Amps;
 extern float maxBulkHours;
 
+extern const int LOAD_CONTROL_PIN;
 extern unsigned long loadOffStartTime;
 extern unsigned long loadOffDuration;
 extern bool temporaryLoadOff;
