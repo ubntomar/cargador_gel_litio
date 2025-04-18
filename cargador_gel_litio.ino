@@ -4,18 +4,13 @@
 #include <WebServer.h>
 #include "esp_task_wdt.h"
 #include <Preferences.h>
-#include "web_server.h"  // Incluir el archivo del servidor web------
+#include "config.h"        // Incluimos el nuevo archivo de configuración
+#include "web_server.h"    // Incluir el archivo del servidor web
 
 Preferences preferences;
 #define WDT_TIMEOUT 10
 
-// Definición de pines I2C
-#define SDA_PIN 8
-#define SCL_PIN 9
 
-// Pines de control
-#define LOAD_CONTROL_PIN 7
-#define LED_SOLAR 3
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);
@@ -32,6 +27,9 @@ float maxAllowedCurrent = 6000.0;
 
 //Máximo voltaje de batería
 const float maxBatteryVoltageAllowed = 15.0;
+
+// Variable compartida para la nota personalizada
+String notaPersonalizada = "";
 
 
 // Parámetros de carga para baterías de gel
@@ -72,9 +70,9 @@ int currentPWM = 0;
 float panelToBatteryCurrent = 0;
 float batteryToLoadCurrent = 0;
 
-// Parámetros de control de voltaje
-const float LVD = 12.0;
-const float LVR = 12.5;
+// Parámetros de control de voltaje ya están en config.h
+// const float LVD = 12.0;
+// const float LVR = 12.5;
 
 // Configuración del punto de acceso
 const char *ssid = "Cargador";
@@ -85,18 +83,15 @@ float batteryCapacity = 50.0;
 float thresholdPercentage = 1.0;
 bool isLithium = false;
 
-// Definiciones para el sensor de temperatura
-#define TEMP_PIN A3
-#define SERIES_RESISTOR 10000.0
-#define NOMINAL_RESISTANCE 10000.0
-#define NOMINAL_TEMPERATURE 25.0
-#define BETA 3984.0
-#define ADC_RESOLUTION 4095.0
-#define VCC 3.3
-#define NUM_SAMPLES 20
+
 float temperature;
 
-#define TEMP_THRESHOLD_SHUTDOWN 55
+
+
+// Variables para el control de apagado temporal de la carga
+unsigned long loadOffStartTime = 0;
+unsigned long loadOffDuration = 0;
+bool temporaryLoadOff = false;
 
 float readTemperature();
 void saveChargingState();
@@ -113,6 +108,7 @@ void floatControl(float batteryVoltage, float floatVoltage);
 void adjustPWM(int step);
 void setPWM(int pwmValue);
 String getChargeStateString(ChargeState state);
+
 
 void setup() {
   Serial.begin(9600);

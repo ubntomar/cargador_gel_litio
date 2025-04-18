@@ -3,6 +3,7 @@
 
 #include <WebServer.h>
 #include <Adafruit_INA219.h>
+#include "config.h"
 
 extern WebServer server;
 extern String notaPersonalizada;
@@ -10,19 +11,12 @@ extern bool useFuenteDC;
 extern float fuenteDC_Amps;
 extern float maxBulkHours;
 
-extern const int LOAD_CONTROL_PIN;
+// Declarar estas variables como externas (definidas en el archivo principal)
 extern unsigned long loadOffStartTime;
 extern unsigned long loadOffDuration;
 extern bool temporaryLoadOff;
-void checkLoadOffTimer();
 
-// Estados de carga (debe coincidir con la definición en el archivo principal)
-enum ChargeState {
-  BULK_CHARGE,
-  ABSORPTION_CHARGE,
-  FLOAT_CHARGE,
-  ERROR
-};
+void checkLoadOffTimer();
 
 // Declaración de la función getChargeStateString
 extern String getChargeStateString(ChargeState state);
@@ -41,8 +35,6 @@ extern float floatVoltage;
 extern float panelToBatteryCurrent;
 extern float batteryToLoadCurrent;
 extern int currentPWM;
-extern const float LVD;
-extern const float LVR;
 extern float calculatedAbsorptionHours;
 extern float accumulatedAh;
 extern float temperature;

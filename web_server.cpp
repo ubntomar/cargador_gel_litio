@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include "config.h"
 #include <Preferences.h>
 
 WebServer server(80);
@@ -10,18 +11,16 @@ String randomStateColor = "";
 // Variable para almacenar la nota
 String notaPersonalizada = "";
 
-
-bool useFuenteDC = false;
-float fuenteDC_Amps = 0.0;
-float maxBulkHours = 0.0;
-
+// Estas variables ahora se declaran como externas (ya están definidas en cargador_gel_litio.ino)
+extern bool useFuenteDC;
+extern float fuenteDC_Amps;
+extern float maxBulkHours;
 
 // Variables para el control de apagado temporal de la carga
-unsigned long loadOffStartTime = 0;
-unsigned long loadOffDuration = 0;
-bool temporaryLoadOff = false;
-
-
+// Ahora son externas (ya definidas en cargador_gel_litio.ino)
+extern unsigned long loadOffStartTime;
+extern unsigned long loadOffDuration;
+extern bool temporaryLoadOff;
 
 // Función para generar un color hexadecimal aleatorio
 String generateRandomColor() {
@@ -34,14 +33,15 @@ String generateRandomColor() {
   return String(colorBuffer);
 }
 
-  void checkLoadOffTimer() {
-    if (temporaryLoadOff && millis() - loadOffStartTime >= loadOffDuration) {
-      // Solo encender si fue apagado por esta funcionalidad y no por otras razones
-      digitalWrite(LOAD_CONTROL_PIN, HIGH);
-      temporaryLoadOff = false;
-      notaPersonalizada = "Carga reactivada automáticamente después del tiempo especificado";
-    }
+void checkLoadOffTimer() {
+  if (temporaryLoadOff && millis() - loadOffStartTime >= loadOffDuration) {
+    // Solo encender si fue apagado por esta funcionalidad y no por otras razones
+    digitalWrite(LOAD_CONTROL_PIN, HIGH);
+    temporaryLoadOff = false;
+    notaPersonalizada = "Carga reactivada automáticamente después del tiempo especificado";
   }
+}
+
 
 
 void initWebServer() {
