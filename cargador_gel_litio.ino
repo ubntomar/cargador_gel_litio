@@ -10,7 +10,10 @@
 Preferences preferences;
 #define WDT_TIMEOUT 10
 
-
+// Definición de variables para la fuente DC
+bool useFuenteDC = false;
+float fuenteDC_Amps = 0.0;
+float maxBulkHours = 0.0;
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);

@@ -8,8 +8,7 @@ extern Preferences preferences;
 // Variable global para almacenar el color aleatorio
 String randomStateColor = "";
 
-// Variable para almacenar la nota
-String notaPersonalizada = "";
+
 
 // Estas variables ahora se declaran como externas (ya están definidas en cargador_gel_litio.ino)
 extern bool useFuenteDC;
