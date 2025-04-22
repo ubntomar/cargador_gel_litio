@@ -8,7 +8,7 @@
 #include "web_server.h"    // Incluir el archivo del servidor web
 
 Preferences preferences;
-#define WDT_TIMEOUT 10
+#define WDT_TIMEOUT 15
 
 // Definición de variables para la fuente DC
 bool useFuenteDC = false;

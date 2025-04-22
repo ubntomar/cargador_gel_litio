@@ -105,6 +105,7 @@ void initWebServer() {
       if (seconds > 0 && seconds <= 300) { // Máximo 5 minutos (300 segundos)
         if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
           digitalWrite(LOAD_CONTROL_PIN, LOW);
+          delay(1000);
           temporaryLoadOff = true;
           loadOffStartTime = millis();
           loadOffDuration = seconds * 1000; // Convertir a milisegundos
@@ -211,7 +212,7 @@ String getHTML() {
   html += "<form action='/toggle-load' method='POST'>";
   html += "<div class='form-group'>";
   html += "<label for='seconds'>Apagar carga temporalmente (segundos):</label>";
-  html += "<input type='number' id='seconds' name='seconds' min='1' max='300' value='5' required>";
+  html += "<input type='number' id='seconds' name='seconds' min='1' max='300' value='10' required>";
   html += "<input type='submit' value='Apagar'>";
   html += "</div>";
   html += "</form>";
