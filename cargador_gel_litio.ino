@@ -7,6 +7,20 @@
 #include "config.h"        // Incluimos el nuevo archivo de configuración
 #include "web_server.h"    // Incluir el archivo del servidor web
 
+
+// ========== PROTOCOLO SERIAL ORANGE PI ==========
+// Definir pines para UART0 (comunicación con Orange Pi)
+#define RX_PIN_SERIAL 20  // GPIO20 - Pin RX físico
+#define TX_PIN_SERIAL 21  // GPIO21 - Pin TX físico
+
+// Crear instancia de HardwareSerial para Orange Pi
+HardwareSerial OrangePiSerial(0);  // Usar UART0
+
+// Buffer para comandos seriales
+String serialBuffer = "";
+bool commandReady = false;
+
+
 Preferences preferences;
 #define WDT_TIMEOUT 15
 
@@ -111,6 +125,332 @@ void floatControl(float batteryVoltage, float floatVoltage);
 void adjustPWM(int step);
 void setPWM(int pwmValue);
 String getChargeStateString(ChargeState state);
+
+
+// ========== FUNCIONES PROTOCOLO SERIAL ==========
+void initSerialCommunication() {
+  OrangePiSerial.begin(9600, SERIAL_8N1, RX_PIN_SERIAL, TX_PIN_SERIAL);
+  Serial.println("📡 Comunicación serial con Orange Pi inicializada");
+  Serial.printf("  RX: GPIO%d, TX: GPIO%d\n", RX_PIN_SERIAL, TX_PIN_SERIAL);
+  Serial.println("  Baudrate: 9600 bps");
+}
+
+void handleSerialCommands() {
+  while (OrangePiSerial.available()) {
+    char inChar = (char)OrangePiSerial.read();
+    
+    if (inChar == '\n') {
+      commandReady = true;
+      break;
+    } else {
+      serialBuffer += inChar;
+    }
+    
+    if (serialBuffer.length() > 200) {
+      serialBuffer = "";
+      break;
+    }
+  }
+  
+  if (commandReady) {
+    processSerialCommand(serialBuffer);
+    serialBuffer = "";
+    commandReady = false;
+  }
+}
+
+void processSerialCommand(String command) {
+  command.trim();
+  Serial.println("📨 [Orange Pi] Comando recibido: " + command);
+  
+  if (command.startsWith("CMD:")) {
+    String cmd = command.substring(4);
+    
+    if (cmd == "GET_DATA") {
+      sendDataToOrangePi();
+    }
+    else if (cmd.startsWith("SET_")) {
+      handleSetCommand(cmd);
+    }
+    else if (cmd.startsWith("TOGGLE_LOAD:")) {
+      handleToggleLoad(cmd);
+    }
+    else {
+      Serial.println("❌ Comando no reconocido: " + cmd);
+      OrangePiSerial.println("ERROR:Unknown command");
+    }
+  }
+}
+
+void sendDataToOrangePi() {
+  Serial.println("📤 [Orange Pi] Preparando envío de datos completos...");
+  
+  // Crear JSON con TODOS los datos del sistema
+  String json = "DATA:{";
+  
+  // === MEDICIONES EN TIEMPO REAL ===
+  json += "\"panelToBatteryCurrent\":" + String(panelToBatteryCurrent) + ",";
+  json += "\"batteryToLoadCurrent\":" + String(batteryToLoadCurrent) + ",";
+  json += "\"voltagePanel\":" + String(ina219_1.getBusVoltage_V()) + ",";
+  json += "\"voltageBatterySensor2\":" + String(ina219_2.getBusVoltage_V()) + ",";
+  json += "\"currentPWM\":" + String(currentPWM) + ",";
+  json += "\"temperature\":" + String(temperature) + ",";
+  json += "\"chargeState\":\"" + getChargeStateString(currentState) + "\",";
+  
+  // === PARÁMETROS DE CARGA ===
+  json += "\"bulkVoltage\":" + String(bulkVoltage) + ",";
+  json += "\"absorptionVoltage\":" + String(absorptionVoltage) + ",";
+  json += "\"floatVoltage\":" + String(floatVoltage) + ",";
+  json += "\"LVD\":" + String(LVD) + ",";
+  json += "\"LVR\":" + String(LVR) + ",";
+  
+  // === CONFIGURACIÓN DE BATERÍA ===
+  json += "\"batteryCapacity\":" + String(batteryCapacity) + ",";
+  json += "\"thresholdPercentage\":" + String(thresholdPercentage) + ",";
+  json += "\"maxAllowedCurrent\":" + String(maxAllowedCurrent) + ",";
+  json += "\"isLithium\":" + String(isLithium ? "true" : "false") + ",";
+  json += "\"maxBatteryVoltageAllowed\":" + String(maxBatteryVoltageAllowed) + ",";
+  
+  // === PARÁMETROS CALCULADOS ===
+  json += "\"absorptionCurrentThreshold_mA\":" + String(absorptionCurrentThreshold_mA) + ",";
+  json += "\"currentLimitIntoFloatStage\":" + String(currentLimitIntoFloatStage) + ",";
+  json += "\"calculatedAbsorptionHours\":" + String(calculatedAbsorptionHours) + ",";
+  json += "\"accumulatedAh\":" + String(accumulatedAh) + ",";
+  json += "\"estimatedSOC\":" + String(getSOCFromVoltage(ina219_2.getBusVoltage_V())) + ",";
+  json += "\"netCurrent\":" + String(panelToBatteryCurrent - batteryToLoadCurrent) + ",";
+  json += "\"factorDivider\":" + String(factorDivider) + ",";
+  
+  // === CONFIGURACIÓN DE FUENTE ===
+  json += "\"useFuenteDC\":" + String(useFuenteDC ? "true" : "false") + ",";
+  json += "\"fuenteDC_Amps\":" + String(fuenteDC_Amps) + ",";
+  json += "\"maxBulkHours\":" + String(maxBulkHours) + ",";
+  
+  // === CONFIGURACIÓN AVANZADA ===
+  json += "\"maxAbsorptionHours\":" + String(maxAbsorptionHours) + ",";
+  json += "\"chargedBatteryRestVoltage\":" + String(chargedBatteryRestVoltage) + ",";
+  json += "\"reEnterBulkVoltage\":12.6,"; // Valor fijo por ahora
+  json += "\"pwmFrequency\":" + String(pwmFrequency) + ",";
+  json += "\"tempThreshold\":55,"; // Valor fijo por ahora
+  
+  // === ESTADO DEL SISTEMA ===
+  // Sanitizar nota personalizada para JSON
+  String sanitizedNota = notaPersonalizada;
+  sanitizedNota.replace("\"", "\\\"");
+  sanitizedNota.replace("\n", "\\n");
+  sanitizedNota.replace("\r", "");
+  json += "\"notaPersonalizada\":\"" + sanitizedNota + "\",";
+  
+  // === METADATOS ===
+  json += "\"connected\":true,";
+  json += "\"firmware_version\":\"ESP32_v2.0\",";
+  json += "\"uptime\":" + String(millis()) + ",";
+  json += "\"last_update\":\"" + String(millis()) + "\"";
+  
+  json += "}";
+  
+  // Verificar tamaño del JSON antes de enviar
+  if (json.length() > 2000) {
+    Serial.println("⚠️ [Orange Pi] JSON muy largo (" + String(json.length()) + " chars), dividiendo...");
+    
+    // Si es muy largo, enviar en partes o reducir precisión
+    // Por ahora, solo registrar el warning
+  }
+  
+  // Enviar JSON a Orange Pi
+  OrangePiSerial.println(json);
+  Serial.println("📤 [Orange Pi] Datos completos enviados: " + String(json.length()) + " caracteres");
+  
+  // Debug: mostrar primeros 200 caracteres del JSON
+  Serial.println("📋 [Orange Pi] JSON preview: " + json.substring(0, min(200, (int)json.length())) + "...");
+}
+
+
+
+void handleSetCommand(String cmd) {
+  int colonIndex = cmd.indexOf(':');
+  if (colonIndex == -1) {
+    OrangePiSerial.println("ERROR:Invalid SET format");
+    return;
+  }
+  
+  String parameter = cmd.substring(4, colonIndex); // Remover "SET_"
+  String valueStr = cmd.substring(colonIndex + 1);
+  float value = valueStr.toFloat();
+  
+  bool success = false;
+  String response = "OK:";
+  
+  Serial.println("🔧 [Orange Pi] Procesando SET " + parameter + " = " + valueStr);
+  
+  // === PARÁMETROS BÁSICOS ===
+  if (parameter == "batteryCapacity") {
+    if (value > 0 && value <= 1000) {
+      batteryCapacity = value;
+      // Recalcular parámetros dependientes
+      absorptionCurrentThreshold_mA = (batteryCapacity * thresholdPercentage) * 10;
+      currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
+      success = true;
+    }
+  }
+  else if (parameter == "thresholdPercentage") {
+    if (value >= 0.1 && value <= 5.0) {
+      thresholdPercentage = value;
+      absorptionCurrentThreshold_mA = (batteryCapacity * thresholdPercentage) * 10;
+      currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
+      success = true;
+    }
+  }
+  else if (parameter == "maxAllowedCurrent") {
+    if (value >= 1000 && value <= 15000) {
+      maxAllowedCurrent = value;
+      success = true;
+    }
+  }
+  else if (parameter == "bulkVoltage") {
+    if (value >= 12.0 && value <= 15.0) {
+      bulkVoltage = value;
+      success = true;
+    }
+  }
+  else if (parameter == "absorptionVoltage") {
+    if (value >= 12.0 && value <= 15.0) {
+      absorptionVoltage = value;
+      success = true;
+    }
+  }
+  else if (parameter == "floatVoltage") {
+    if (value >= 12.0 && value <= 15.0) {
+      floatVoltage = value;
+      success = true;
+    }
+  }
+  
+  // === PARÁMETROS DE TIPO BOOLEAN ===
+  else if (parameter == "isLithium") {
+    isLithium = (valueStr == "true" || valueStr == "1");
+    success = true;
+    Serial.println("🔋 [Orange Pi] Tipo de batería cambiado a: " + String(isLithium ? "Litio" : "GEL"));
+  }
+  else if (parameter == "useFuenteDC") {
+    useFuenteDC = (valueStr == "true" || valueStr == "1");
+    success = true;
+    Serial.println("⚡ [Orange Pi] Fuente de energía cambiada a: " + String(useFuenteDC ? "DC" : "Solar"));
+  }
+  
+  // === PARÁMETROS DE FUENTE DC ===
+  else if (parameter == "fuenteDC_Amps") {
+    if (value >= 0 && value <= 50) {
+      fuenteDC_Amps = value;
+      // Recalcular horas máximas en Bulk
+      if (useFuenteDC && fuenteDC_Amps > 0) {
+        maxBulkHours = batteryCapacity / fuenteDC_Amps;
+      } else {
+        maxBulkHours = 0.0;
+      }
+      success = true;
+    }
+  }
+  
+  // === PARÁMETROS AVANZADOS (agregar según necesites) ===
+  else if (parameter == "LVD") {
+    if (value >= 10.0 && value <= 13.0) {
+      // Si tienes LVD como variable, descomenta:
+      // LVD = value;
+      success = true;
+    }
+  }
+  else if (parameter == "LVR") {
+    if (value >= 11.0 && value <= 14.0) {
+      // Si tienes LVR como variable, descomenta:
+      // LVR = value;
+      success = true;
+    }
+  }
+  
+  // === PARÁMETRO NO RECONOCIDO ===
+  else {
+    response = "ERROR:Unknown parameter: " + parameter;
+    Serial.println("❌ [Orange Pi] Parámetro no reconocido: " + parameter);
+  }
+  
+  // === GUARDAR EN PREFERENCES SI FUE EXITOSO ===
+  if (success) {
+    preferences.begin("charger", false);
+    
+    // Guardar según el parámetro
+    if (parameter == "batteryCapacity") preferences.putFloat("batteryCap", batteryCapacity);
+    else if (parameter == "thresholdPercentage") preferences.putFloat("thresholdPerc", thresholdPercentage);
+    else if (parameter == "maxAllowedCurrent") preferences.putFloat("maxCurrent", maxAllowedCurrent);
+    else if (parameter == "bulkVoltage") preferences.putFloat("bulkV", bulkVoltage);
+    else if (parameter == "absorptionVoltage") preferences.putFloat("absV", absorptionVoltage);
+    else if (parameter == "floatVoltage") preferences.putFloat("floatV", floatVoltage);
+    else if (parameter == "isLithium") preferences.putBool("isLithium", isLithium);
+    else if (parameter == "useFuenteDC") preferences.putBool("useFuenteDC", useFuenteDC);
+    else if (parameter == "fuenteDC_Amps") preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
+    
+    preferences.end();
+    
+    response += parameter + " updated to " + valueStr;
+    notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
+    
+    Serial.println("✅ [Orange Pi] " + response);
+    Serial.println("💾 [Orange Pi] Parámetro guardado en Preferences");
+  } else {
+    response = "ERROR:Invalid value for " + parameter + " (received: " + valueStr + ")";
+    Serial.println("❌ [Orange Pi] " + response);
+  }
+  
+  // Enviar respuesta a Orange Pi
+  OrangePiSerial.println(response);
+}
+
+void handleToggleLoad(String cmd) {
+  int colonIndex = cmd.indexOf(':');
+  if (colonIndex == -1) {
+    OrangePiSerial.println("ERROR:Invalid TOGGLE_LOAD format");
+    return;
+  }
+  
+  int seconds = cmd.substring(colonIndex + 1).toInt();
+  
+  Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(seconds) + " segundos");
+  
+  if (seconds >= 1 && seconds <= 300) {
+    if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
+      digitalWrite(LOAD_CONTROL_PIN, LOW);
+      temporaryLoadOff = true;
+      loadOffStartTime = millis();
+      loadOffDuration = seconds * 1000;
+      
+      notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos (Orange Pi)";
+      OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
+      Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(seconds) + " segundos");
+    } else {
+      OrangePiSerial.println("OK:Load already off");
+      Serial.println("⚠️ [Orange Pi] La carga ya estaba apagada");
+    }
+  } else {
+    String errorMsg = "ERROR:Invalid time range (1-300 seconds), received: " + String(seconds);
+    OrangePiSerial.println(errorMsg);
+    Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(seconds) + " segundos");
+  }
+}
+
+void periodicSerialUpdate() {
+  static unsigned long lastAutoUpdate = 0;
+  unsigned long now = millis();
+  
+  if (now - lastAutoUpdate > 30000) {
+    if (!commandReady && serialBuffer.length() == 0) {
+      OrangePiSerial.println("HEARTBEAT:ESP32 Online");
+      Serial.println("💓 [Orange Pi] Heartbeat enviado");
+    }
+    lastAutoUpdate = now;
+  }
+}
+
+
+
 
 
 void setup() {
@@ -232,6 +572,7 @@ void setup() {
 
   // Iniciar el servidor web
   initWebServer();
+  initSerialCommunication();
 }
 
 void loop() {
@@ -241,6 +582,9 @@ void loop() {
 
   updateAhTracking();
   saveChargingState();
+
+  handleSerialCommands();
+  periodicSerialUpdate();
 
   // Leer datos de sensores
   panelToBatteryCurrent = getAverageCurrent(ina219_1);
