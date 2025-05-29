@@ -188,6 +188,123 @@
         .fallback-icon.battery::before { content: "🔋"; }
         .fallback-icon.sun::before { content: "☀️"; }
         .fallback-icon.thermometer::before { content: "🌡️"; }
+    
+        /* ===== CRONÓMETRO VISUAL - AGREGAR AL FINAL DEL <style> EXISTENTE ===== */
+
+    /* Estilos para el cronómetro */
+    .countdown-container {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 15px;
+        padding: 20px;
+        text-align: center;
+        color: white;
+        margin: 20px 0;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    .countdown-timer {
+        font-size: 3rem;
+        font-weight: bold;
+        font-family: 'Courier New', monospace;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        margin: 15px 0;
+        letter-spacing: 2px;
+    }
+
+    .countdown-label {
+        font-size: 1.2rem;
+        margin-bottom: 10px;
+        opacity: 0.9;
+    }
+
+    .countdown-status {
+        font-size: 1rem;
+        background: rgba(255, 255, 255, 0.2);
+        padding: 8px 16px;
+        border-radius: 20px;
+        display: inline-block;
+        margin-top: 10px;
+    }
+
+    .progress-ring {
+        transform: rotate(-90deg);
+        margin: 20px auto;
+    }
+
+    .progress-ring-circle {
+        transition: stroke-dashoffset 1s ease-in-out;
+        stroke: #fff;
+        stroke-width: 4;
+        fill: transparent;
+        opacity: 0.8;
+    }
+
+    .countdown-controls {
+        margin-top: 15px;
+    }
+
+    .countdown-controls button {
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: white;
+        padding: 8px 16px;
+        border-radius: 20px;
+        margin: 0 5px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .countdown-controls button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: translateY(-2px);
+    }
+
+    /* Animación pulsante para estado crítico */
+    @keyframes pulse-critical {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+    }
+
+    .countdown-critical {
+        animation: pulse-critical 1s infinite;
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%) !important;
+    }
+
+    /* Estilos para diferentes estados */
+    .countdown-normal {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .countdown-warning {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    }
+
+    .countdown-inactive {
+        background: linear-gradient(135deg, #a8a8a8 0%, #7d7d7d 100%);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .countdown-timer {
+            font-size: 2.5rem;
+        }
+        .countdown-container {
+            padding: 15px;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .countdown-timer {
+            font-size: 2rem;
+        }
+        .countdown-label {
+            font-size: 1rem;
+        }
+    }
+
+    /* ===== FIN DE ESTILOS DEL CRONÓMETRO ===== */
+    
     </style>
 </head>
 <body>
