@@ -175,12 +175,27 @@ void processSerialCommand(String command) {
     else if (cmd.startsWith("TOGGLE_LOAD:")) {
       handleToggleLoad(cmd);
     }
+    else if (cmd == "CANCEL_TEMP_OFF") {
+      // NUEVO: Comando para cancelar apagado temporal
+      if (temporaryLoadOff) {
+        temporaryLoadOff = false;
+        digitalWrite(LOAD_CONTROL_PIN, HIGH);
+        notaPersonalizada = "Apagado temporal cancelado (Orange Pi)";
+        OrangePiSerial.println("OK:Temporary load off cancelled");
+        Serial.println("✅ [Orange Pi] Apagado temporal cancelado");
+      } else {
+        OrangePiSerial.println("OK:No temporary off active");
+        Serial.println("ℹ️ [Orange Pi] No hay apagado temporal activo");
+      }
+    }
     else {
       Serial.println("❌ Comando no reconocido: " + cmd);
       OrangePiSerial.println("ERROR:Unknown command");
     }
   }
 }
+
+
 
 void sendDataToOrangePi() {
   Serial.println("📤 [Orange Pi] Preparando envío de datos completos...");
@@ -232,7 +247,25 @@ void sendDataToOrangePi() {
   json += "\"pwmFrequency\":" + String(pwmFrequency) + ",";
   json += "\"tempThreshold\":55,"; // Valor fijo por ahora
   
+  // === ESTADO DE APAGADO TEMPORAL ===
+  json += "\"temporaryLoadOff\":" + String(temporaryLoadOff ? "true" : "false") + ",";
+  if (temporaryLoadOff) {
+    unsigned long remainingTime = 0;
+    unsigned long elapsed = millis() - loadOffStartTime;
+    if (elapsed < loadOffDuration) {
+      remainingTime = (loadOffDuration - elapsed) / 1000; // Convertir a segundos
+    }
+    json += "\"loadOffRemainingSeconds\":" + String(remainingTime) + ",";
+    json += "\"loadOffDuration\":" + String(loadOffDuration / 1000) + ",";
+  } else {
+    json += "\"loadOffRemainingSeconds\":0,";
+    json += "\"loadOffDuration\":0,";
+  }
+  
   // === ESTADO DEL SISTEMA ===
+  json += "\"loadControlState\":" + String(digitalRead(LOAD_CONTROL_PIN) ? "true" : "false") + ",";
+  json += "\"ledSolarState\":" + String(digitalRead(LED_SOLAR) ? "true" : "false") + ",";
+  
   // Sanitizar nota personalizada para JSON
   String sanitizedNota = notaPersonalizada;
   sanitizedNota.replace("\"", "\\\"");
@@ -242,7 +275,7 @@ void sendDataToOrangePi() {
   
   // === METADATOS ===
   json += "\"connected\":true,";
-  json += "\"firmware_version\":\"ESP32_v2.0\",";
+  json += "\"firmware_version\":\"ESP32_v2.1\",";
   json += "\"uptime\":" + String(millis()) + ",";
   json += "\"last_update\":\"" + String(millis()) + "\"";
   
@@ -251,8 +284,6 @@ void sendDataToOrangePi() {
   // Verificar tamaño del JSON antes de enviar
   if (json.length() > 2000) {
     Serial.println("⚠️ [Orange Pi] JSON muy largo (" + String(json.length()) + " chars), dividiendo...");
-    
-    // Si es muy largo, enviar en partes o reducir precisión
     // Por ahora, solo registrar el warning
   }
   
@@ -263,6 +294,7 @@ void sendDataToOrangePi() {
   // Debug: mostrar primeros 200 caracteres del JSON
   Serial.println("📋 [Orange Pi] JSON preview: " + json.substring(0, min(200, (int)json.length())) + "...");
 }
+
 
 
 
@@ -367,6 +399,14 @@ void handleSetCommand(String cmd) {
     }
   }
   
+  else if (parameter == "factorDivider") {
+    if (value >= 1 && value <= 10) {
+      factorDivider = (int)value;
+      currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
+      success = true;
+    }
+  }
+
   // === PARÁMETRO NO RECONOCIDO ===
   else {
     response = "ERROR:Unknown parameter: " + parameter;
@@ -404,6 +444,7 @@ void handleSetCommand(String cmd) {
   OrangePiSerial.println(response);
 }
 
+
 void handleToggleLoad(String cmd) {
   int colonIndex = cmd.indexOf(':');
   if (colonIndex == -1) {
@@ -415,12 +456,13 @@ void handleToggleLoad(String cmd) {
   
   Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(seconds) + " segundos");
   
-  if (seconds >= 1 && seconds <= 300) {
+  // CAMBIO: Aumentar límite a 43200 segundos (12 horas)
+  if (seconds >= 1 && seconds <= 43200) {
     if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
       digitalWrite(LOAD_CONTROL_PIN, LOW);
       temporaryLoadOff = true;
       loadOffStartTime = millis();
-      loadOffDuration = seconds * 1000;
+      loadOffDuration = seconds * 1000UL; // UL para evitar overflow
       
       notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos (Orange Pi)";
       OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
@@ -430,11 +472,12 @@ void handleToggleLoad(String cmd) {
       Serial.println("⚠️ [Orange Pi] La carga ya estaba apagada");
     }
   } else {
-    String errorMsg = "ERROR:Invalid time range (1-300 seconds), received: " + String(seconds);
+    String errorMsg = "ERROR:Invalid time range (1-43200 seconds), received: " + String(seconds);
     OrangePiSerial.println(errorMsg);
     Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(seconds) + " segundos");
   }
 }
+
 
 void periodicSerialUpdate() {
   static unsigned long lastAutoUpdate = 0;
@@ -625,12 +668,22 @@ void loop() {
   }
 
   // Control de voltaje (LVD y LVR)
-  if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
-    digitalWrite(LOAD_CONTROL_PIN, LOW);
-    Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)  :LOAD_CONTROL_PIN, LOW");
-  } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed   ) {
-    digitalWrite(LOAD_CONTROL_PIN, HIGH);
-    Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)   :LOAD_CONTROL_PIN, HIGH");
+  if (!temporaryLoadOff) {
+    if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, LOW);
+      Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)");
+    } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
+    }
+  } else {
+    // Si hay un apagado temporal activo, verificar si debe terminar
+    if (millis() - loadOffStartTime >= loadOffDuration) {
+      temporaryLoadOff = false;
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      notaPersonalizada = "Apagado temporal completado, carga reactivada";
+      Serial.println("⏰ Apagado temporal completado, carga reactivada");
+    }
   }
 
   // RE-ENTRY CHECK

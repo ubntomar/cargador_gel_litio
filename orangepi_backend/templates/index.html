@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orange Pi Solar Charger Control</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <!-- Font Awesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2gFLSOPxQzYSlhRnxP+1W8xK/HWSLxhwO6g+3A2MNy+u1T0FwXp4d-C5uA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <!-- Custom CSS -->
+    <style>
+        body {
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .navbar {
+            background-color: #2c3e50;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,.1);
+        }
+        .navbar-brand {
+            color: white !important;
+            font-weight: bold;
+        }
+        .navbar-brand .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            border: 1px solid rgba(255,255,255,0.5);
+            animation: pulse 1.5s infinite;
+        }
+        .navbar-brand .status-indicator.connected {
+            background-color: #28a745; /* Verde */
+        }
+        .navbar-brand .status-indicator.disconnected {
+            background-color: #dc3545; /* Rojo */
+        }
+        .navbar-brand .status-indicator.warning {
+            background-color: #ffc107; /* Amarillo */
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(40,167,69, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(40,167,69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(40,167,69, 0); }
+        }
+        .status-indicator.disconnected { animation: none !important; }
+        .status-indicator.warning { animation: pulse-warning 1.5s infinite; }
+        @keyframes pulse-warning {
+            0% { box-shadow: 0 0 0 0 rgba(255,193,7, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255,193,7, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255,193,7, 0); }
+        }
+
+        .container {
+            margin-top: 20px;
+        }
+        .card {
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,.05);
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: #34495e;
+            color: white;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+        .nav-tabs .nav-link.active {
+            background-color: #34495e;
+            color: white;
+            border-color: #34495e;
+        }
+        .nav-tabs .nav-link {
+            color: #555;
+        }
+        .metric-card .card-body {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .metric-card .metric-icon {
+            font-size: 2.5rem;
+            color: #3498db;
+        }
+        .metric-card .metric-value {
+            font-size: 2.2rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .metric-card .metric-unit {
+            font-size: 1rem;
+            color: #777;
+        }
+        .metric-card .metric-label {
+            font-size: 1.1rem;
+            color: #555;
+            margin-top: 5px;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .form-label {
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 40px;
+            padding: 20px;
+            text-align: center;
+            color: #777;
+            font-size: 0.9rem;
+            border-top: 1px solid #eee;
+        }
+        .alert-fixed {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1050;
+            min-width: 250px;
+        }
+        .log-display {
+            height: 400px;
+            overflow-y: scroll;
+            background-color: #2b2b2b;
+            color: #f8f8f2;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85em;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap; /* Para que los logs largos no rompan la línea */
+        }
+        .card.config-section {
+            margin-bottom: 15px;
+        }
+        .card.config-section .card-header {
+            cursor: pointer; /* Indica que es clickeable */
+            padding: 10px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .card.config-section .card-header h5 {
+            margin-bottom: 0;
+            color: white;
+        }
+        .card.config-section .card-body {
+            display: none; /* Ocultar por defecto */
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+        .card.config-section.expanded .card-body {
+            display: block; /* Mostrar cuando está expandido */
+        }
+        .card.config-section .card-header .fa-chevron-down,
+        .card.config-section .card-header .fa-chevron-up {
+            transition: transform 0.3s ease;
+        }
+        .card.config-section.expanded .card-header .fa-chevron-down {
+            transform: rotate(180deg);
+        }
+        
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <span id="connection-status-indicator" class="status-indicator disconnected"></span>
+                Control de Cargador Solar 
+                <small id="firmware-version-display" class="ms-2">vX.X</small>
+            </a>
+            <div class="d-flex align-items-center">
+                <span class="text-white me-3 d-none d-md-inline">Última Actualización: <span id="last-update-time">--:--:--</span></span>
+                <span class="text-white me-3 d-none d-md-inline">Uptime: <span id="server-uptime-display">0s</span></span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- Alerts/Toasts Placeholder -->
+        <div id="alerts-container" class="alert-fixed"></div>
+
+        <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard-tab-pane" type="button" role="tab" aria-controls="dashboard-tab-pane" aria-selected="true">
+                    <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="configuration-tab" data-bs-toggle="tab" data-bs-target="#configuration-tab-pane" type="button" role="tab" aria-controls="configuration-tab-pane" aria-selected="false">
+                    <i class="fas fa-cog me-2"></i>Configuración
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="load-control-tab" data-bs-toggle="tab" data-bs-target="#load-control-tab-pane" type="button" role="tab" aria-controls="load-control-tab-pane" aria-selected="false">
+                    <i class="fas fa-lightbulb me-2"></i>Control de Carga
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="system-logs-tab" data-bs-toggle="tab" data-bs-target="#system-logs-tab-pane" type="button" role="tab" aria-controls="system-logs-tab-pane" aria-selected="false">
+                    <i class="fas fa-info-circle me-2"></i>Sistema & Logs
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tools-tab" data-bs-toggle="tab" data-bs-target="#tools-tab-pane" type="button" role="tab" aria-controls="tools-tab-pane" aria-selected="false">
+                    <i class="fas fa-tools me-2"></i>Herramientas
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabsContent">
+            <!-- Dashboard Tab Pane -->
+            <div class="tab-pane fade show active" id="dashboard-tab-pane" role="tabpanel" aria-labelledby="dashboard-tab">
+                <div class="row">
+                    <!-- Main Metrics -->
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-primary-subtle text-primary">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Voltaje Batería</div>
+                                    <div class="metric-value"><span id="battery-voltage">0.00</span><span class="metric-unit">V</span></div>
+                                </div>
+                                <i class="fas fa-car-battery metric-icon text-primary"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-success-subtle text-success">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Voltaje Panel</div>
+                                    <div class="metric-value"><span id="panel-voltage">0.00</span><span class="metric-unit">V</span></div>
+                                </div>
+                                <i class="fas fa-sun metric-icon text-success"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-info-subtle text-info">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Corriente Panel</div>
+                                    <div class="metric-value"><span id="panel-current">0.00</span><span class="metric-unit">A</span></div>
+                                </div>
+                                <i class="fas fa-arrow-down metric-icon text-info"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-danger-subtle text-danger">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Corriente Carga</div>
+                                    <div class="metric-value"><span id="load-current">0.00</span><span class="metric-unit">A</span></div>
+                                </div>
+                                <i class="fas fa-arrow-up metric-icon text-danger"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-warning-subtle text-warning">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Corriente Neta</div>
+                                    <div class="metric-value"><span id="net-current">0.00</span><span class="metric-unit">A</span></div>
+                                </div>
+                                <i class="fas fa-exchange-alt metric-icon text-warning"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4 col-sm-6 mb-3">
+                        <div class="card metric-card h-100 bg-secondary-subtle text-secondary">
+                            <div class="card-body">
+                                <div>
+                                    <div class="metric-label">Temperatura</div>
+                                    <div class="metric-value"><span id="temperature">0.0</span><span class="metric-unit">°C</span></div>
+                                </div>
+                                <i class="fas fa-thermometer-half metric-icon text-secondary"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Charge State & SOC -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-battery-half me-2"></i>Estado de Carga</div>
+                            <div class="card-body">
+                                <p class="card-text"><strong>Estado:</strong> <span id="charge-state" class="badge bg-primary">UNKNOWN</span></p>
+                                <p class="card-text"><strong>SOC Estimado:</strong> <span id="estimated-soc">0</span>% <div class="progress mt-2"><div class="progress-bar" role="progressbar" id="soc-progress-bar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div></div></p>
+                                <p class="card-text"><strong>Ah Acumulados:</strong> <span id="accumulated-ah">0.00</span> Ah</p>
+                                <p class="card-text"><strong>Horas de Absorción Calculadas:</strong> <span id="calculated-absorption-hours">0.0</span>h</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Load Control Status -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-cogs me-2"></i>Estado de Control</div>
+                            <div class="card-body">
+                                <p class="card-text"><strong>Carga Activada:</strong> <span id="load-control-state" class="badge bg-secondary">--</span></p>
+                                <p class="card-text"><strong>Carga Temporalmente Apagada:</strong> <span id="temporary-load-off" class="badge bg-secondary">--</span></p>
+                                <p class="card-text"><strong>Tiempo Restante (Apagado Temporal):</strong> <span id="load-off-remaining-time">00:00:00</span></p>
+                                <p class="card-text"><strong>LED Solar:</strong> <span id="led-solar-state" class="badge bg-secondary">--</span></p>
+                                <p class="card-text"><strong>Nota Personalizada:</strong> <span id="custom-note"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <!-- Charts -->
+                    <div class="col-lg-6 mb-3">
+                        <div class="card">
+                            <div class="card-header"><i class="fas fa-chart-line me-2"></i>Corriente (A)</div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="currentChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6 mb-3">
+                        <div class="card">
+                            <div class="card-header"><i class="fas fa-chart-area me-2"></i>Voltaje (V)</div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="voltageChart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration Tab Pane -->
+            <div class="tab-pane fade" id="configuration-tab-pane" role="tabpanel" aria-labelledby="configuration-tab">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header"><i class="fas fa-sliders-h me-2"></i>Parámetros del Cargador</div>
+                            <div class="card-body">
+                                <div class="accordion" id="configAccordion">
+                                    <!-- Sección de Batería -->
+                                    <div class="card config-section">
+                                        <div class="card-header" id="headingBattery">
+                                            <h5 class="mb-0">
+                                                Ajustes de Batería
+                                            </h5>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label for="batteryCapacity" class="form-label">Capacidad de Batería (Ah):</label>
+                                                <input type="number" step="0.1" min="0" max="1000" class="form-control" id="batteryCapacity" data-param="batteryCapacity">
+                                                <small class="form-text text-muted">Capacidad total de tu banco de baterías en Amperios-hora.</small>
+                                            </div>
+                                            <div class="mb-3 form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="isLithium" data-param="isLithium">
+                                                <label class="form-check-label" for="isLithium">Batería de Litio</label>
+                                                <small class="form-text text-muted">Activar para usar perfiles de carga de Litio.</small>
+                                            </div>
+                                            <button class="btn btn-primary btn-sm save-param-btn" data-param="batteryCapacity,isLithium">Guardar Ajustes de Batería</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sección de Voltajes de Carga -->
+                                    <div class="card config-section">
+                                        <div class="card-header" id="headingVoltages">
+                                            <h5 class="mb-0">
+                                                Voltajes de Carga
+                                            </h5>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label for="bulkVoltage" class="form-label">Voltaje Bulk (V):</label>
+                                                <input type="number" step="0.1" min="12.0" max="15.0" class="form-control" id="bulkVoltage" data-param="bulkVoltage">
+                                                <small class="form-text text-muted">Voltaje objetivo para la etapa de carga Bulk.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="absorptionVoltage" class="form-label">Voltaje Absorción (V):</label>
+                                                <input type="number" step="0.1" min="12.0" max="15.0" class="form-control" id="absorptionVoltage" data-param="absorptionVoltage">
+                                                <small class="form-text text-muted">Voltaje objetivo para la etapa de Absorción.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="floatVoltage" class="form-label">Voltaje Float (V):</label>
+                                                <input type="number" step="0.1" min="12.0" max="15.0" class="form-control" id="floatVoltage" data-param="floatVoltage">
+                                                <small class="form-text text-muted">Voltaje objetivo para la etapa de Flotación.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="maxBatteryVoltageAllowed" class="form-label">Max Voltaje Batería Permitido (V):</label>
+                                                <input type="number" step="0.1" min="12.0" max="15.0" class="form-control" id="maxBatteryVoltageAllowed" data-param="maxBatteryVoltageAllowed">
+                                                <small class="form-text text-muted">Voltaje máximo absoluto para la batería.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="chargedBatteryRestVoltage" class="form-label">Voltaje Batería Cargada (V):</label>
+                                                <input type="number" step="0.01" min="10.0" max="15.0" class="form-control" id="chargedBatteryRestVoltage" data-param="chargedBatteryRestVoltage">
+                                                <small class="form-text text-muted">Voltaje de reposo de la batería completamente cargada (para SOC).</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="reEnterBulkVoltage" class="form-label">Re-entrar Bulk (V):</label>
+                                                <input type="number" step="0.01" min="10.0" max="15.0" class="form-control" id="reEnterBulkVoltage" data-param="reEnterBulkVoltage">
+                                                <small class="form-text text-muted">Voltaje al que el cargador vuelve a la etapa Bulk.</small>
+                                            </div>
+                                            <button class="btn btn-primary btn-sm save-param-btn" data-param="bulkVoltage,absorptionVoltage,floatVoltage,maxBatteryVoltageAllowed,chargedBatteryRestVoltage,reEnterBulkVoltage">Guardar Voltajes</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sección de Corrientes y Tiempos -->
+                                    <div class="card config-section">
+                                        <div class="card-header" id="headingCurrentsTimes">
+                                            <h5 class="mb-0">
+                                                Corrientes y Tiempos
+                                            </h5>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label for="maxAllowedCurrent" class="form-label">Corriente Máxima Permitida (mA):</label>
+                                                <input type="number" step="100" min="1000" max="15000" class="form-control" id="maxAllowedCurrent" data-param="maxAllowedCurrent">
+                                                <small class="form-text text-muted">Corriente máxima que el cargador puede entregar.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="absorptionCurrentThreshold_mA" class="form-label">Umbral Corriente Absorción (mA):</label>
+                                                <input type="number" step="10" min="10" max="5000" class="form-control" id="absorptionCurrentThreshold_mA" data-param="absorptionCurrentThreshold_mA">
+                                                <small class="form-text text-muted">Corriente mínima para finalizar la etapa de absorción.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="currentLimitIntoFloatStage" class="form-label">Límite Corriente a Float (mA):</label>
+                                                <input type="number" step="10" min="10" max="5000" class="form-control" id="currentLimitIntoFloatStage" data-param="currentLimitIntoFloatStage">
+                                                <small class="form-text text-muted">Corriente al pasar a etapa Float.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="maxAbsorptionHours" class="form-label">Max Horas Absorción:</label>
+                                                <input type="number" step="0.1" min="0.1" max="10.0" class="form-control" id="maxAbsorptionHours" data-param="maxAbsorptionHours">
+                                                <small class="form-text text-muted">Tiempo máximo en etapa de Absorción.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="maxBulkHours" class="form-label">Max Horas Bulk:</label>
+                                                <input type="number" step="0.1" min="0.1" max="10.0" class="form-control" id="maxBulkHours" data-param="maxBulkHours">
+                                                <small class="form-text text-muted">Tiempo máximo en etapa de Bulk (para baterías no litio).</small>
+                                            </div>
+                                            <button class="btn btn-primary btn-sm save-param-btn" data-param="maxAllowedCurrent,absorptionCurrentThreshold_mA,currentLimitIntoFloatStage,maxAbsorptionHours,maxBulkHours">Guardar Corrientes/Tiempos</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sección de LVD/LVR y Temperatura -->
+                                    <div class="card config-section">
+                                        <div class="card-header" id="headingLVDTemp">
+                                            <h5 class="mb-0">
+                                                LVD/LVR y Temperatura
+                                            </h5>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label for="LVD" class="form-label">LVD (Low Voltage Disconnect) (V):</label>
+                                                <input type="number" step="0.1" min="10.0" max="13.0" class="form-control" id="LVD" data-param="LVD">
+                                                <small class="form-text text-muted">Voltaje de desconexión de carga por baja tensión.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="LVR" class="form-label">LVR (Low Voltage Reconnect) (V):</label>
+                                                <input type="number" step="0.1" min="11.0" max="14.0" class="form-control" id="LVR" data-param="LVR">
+                                                <small class="form-text text-muted">Voltaje de reconexión de carga después de LVD.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="tempThreshold" class="form-label">Umbral de Temperatura (°C):</label>
+                                                <input type="number" step="1" min="30" max="90" class="form-control" id="tempThreshold" data-param="tempThreshold">
+                                                <small class="form-text text-muted">Temperatura máxima permitida antes de reducir carga o apagar.</small>
+                                            </div>
+                                            <button class="btn btn-primary btn-sm save-param-btn" data-param="LVD,LVR,tempThreshold">Guardar LVD/Temp</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sección de Otros Parámetros -->
+                                    <div class="card config-section">
+                                        <div class="card-header" id="headingOther">
+                                            <h5 class="mb-0">
+                                                Otros Parámetros
+                                            </h5>
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <label for="thresholdPercentage" class="form-label">Porcentaje de Umbral de Carga (%):</label>
+                                                <input type="number" step="0.1" min="0.1" max="5.0" class="form-control" id="thresholdPercentage" data-param="thresholdPercentage">
+                                                <small class="form-text text-muted">Porcentaje de corriente total de la batería para ciertas lógicas.</small>
+                                            </div>
+                                            <div class="mb-3 form-check form-switch">
+                                                <input class="form-check-input" type="checkbox" role="switch" id="useFuenteDC" data-param="useFuenteDC">
+                                                <label class="form-check-label" for="useFuenteDC">Usar Fuente DC Auxiliar</label>
+                                                <small class="form-text text-muted">Activar si hay una fuente de alimentación DC adicional.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="fuenteDC_Amps" class="form-label">Corriente Fuente DC (A):</label>
+                                                <input type="number" step="0.1" min="0" max="50" class="form-control" id="fuenteDC_Amps" data-param="fuenteDC_Amps">
+                                                <small class="form-text text-muted">Amperios de la fuente de alimentación DC auxiliar.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="factorDivider" class="form-label">Factor Divisor (para cálculos):</label>
+                                                <input type="number" step="1" min="1" max="10" class="form-control" id="factorDivider" data-param="factorDivider">
+                                                <small class="form-text text-muted">Valor usado en algunos cálculos internos del ESP32.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="pwmFrequency" class="form-label">Frecuencia PWM (Hz):</label>
+                                                <input type="number" step="1000" min="10000" max="100000" class="form-control" id="pwmFrequency" data-param="pwmFrequency">
+                                                <small class="form-text text-muted">Frecuencia de la señal PWM.</small>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="notaPersonalizada" class="form-label">Nota Personalizada:</label>
+                                                <textarea class="form-control" id="notaPersonalizada" rows="3" data-param="notaPersonalizada"></textarea>
+                                                <small class="form-text text-muted">Una nota personal para mostrar en el dashboard.</small>
+                                            </div>
+                                            <button class="btn btn-primary btn-sm save-param-btn" data-param="thresholdPercentage,useFuenteDC,fuenteDC_Amps,factorDivider,pwmFrequency,notaPersonalizada">Guardar Otros</button>
+                                        </div>
+                                    </div>
+
+                                </div> <!-- End accordion -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Load Control Tab Pane -->
+            <div class="tab-pane fade" id="load-control-tab-pane" role="tabpanel" aria-labelledby="load-control-tab">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-power-off me-2"></i>Apagar Carga Temporalmente</div>
+                            <div class="card-body">
+                                <p class="card-text">Apaga la salida de carga durante un período de tiempo especificado. Útil para mantenimiento o para forzar el apagado.</p>
+                                <div class="row g-3 align-items-end mb-3">
+                                    <div class="col-md-4">
+                                        <label for="loadOffHours" class="form-label">Horas:</label>
+                                        <input type="number" min="0" max="12" class="form-control" id="loadOffHours" value="0">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="loadOffMinutes" class="form-label">Minutos:</label>
+                                        <input type="number" min="0" max="59" class="form-control" id="loadOffMinutes" value="0">
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="loadOffSeconds" class="form-label">Segundos:</label>
+                                        <input type="number" min="0" max="59" class="form-control" id="loadOffSeconds" value="0">
+                                    </div>
+                                </div>
+                                <button class="btn btn-warning" id="toggle-load-btn"><i class="fas fa-hourglass-half me-2"></i>Apagar Carga</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-undo me-2"></i>Cancelar Apagado Temporal</div>
+                            <div class="card-body">
+                                <p class="card-text">Si la carga ha sido apagada temporalmente, puedes reactivarla manualmente con este botón.</p>
+                                <button class="btn btn-success" id="cancel-temp-off-btn"><i class="fas fa-check-circle me-2"></i>Reactivar Carga</button>
+                                <hr>
+                                <p class="card-text"><strong>Estado Actual de Carga:</strong> <span id="current-load-status" class="badge bg-secondary">Cargando...</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System & Logs Tab Pane -->
+            <div class="tab-pane fade" id="system-logs-tab-pane" role="tabpanel" aria-labelledby="system-logs-tab">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-server me-2"></i>Información del Sistema (Orange Pi)</div>
+                            <div class="card-body">
+                                <p><strong>Hostname:</strong> <span id="sysinfo-hostname">N/A</span></p>
+                                <p><strong>Plataforma:</strong> <span id="sysinfo-platform">N/A</span></p>
+                                <p><strong>Versión Python:</strong> <span id="sysinfo-python">N/A</span></p>
+                                <p><strong>Uso CPU:</strong> <span id="sysinfo-cpu">N/A</span></p>
+                                <p><strong>Uso Memoria:</strong> <span id="sysinfo-memory">N/A</span></p>
+                                <p><strong>Uso Disco:</strong> <span id="sysinfo-disk">N/A</span></p>
+                                <p><strong>Boot Time:</strong> <span id="sysinfo-boot-time">N/A</span></p>
+                                <p><strong>Server Uptime:</strong> <span id="sysinfo-server-uptime">N/A</span></p>
+                                <button class="btn btn-info btn-sm" id="refresh-sysinfo-btn"><i class="fas fa-sync-alt me-2"></i>Actualizar Info Sistema</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-file-alt me-2"></i>Logs del Servidor</div>
+                            <div class="card-body d-flex flex-column h-100">
+                                <div class="mb-2 d-flex align-items-center">
+                                    <label for="logLines" class="form-label me-2 mb-0">Líneas:</label>
+                                    <input type="number" class="form-control form-control-sm me-2" id="logLines" value="100" min="10" max="1000" style="width: 80px;">
+                                    <button class="btn btn-dark btn-sm" id="refresh-logs-btn"><i class="fas fa-sync-alt me-2"></i>Actualizar Logs</button>
+                                </div>
+                                <pre id="log-content" class="log-display flex-grow-1">Cargando logs...</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tools Tab Pane -->
+            <div class="tab-pane fade" id="tools-tab-pane" role="tabpanel" aria-labelledby="tools-tab">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-download me-2"></i>Exportar Configuración</div>
+                            <div class="card-body">
+                                <p class="card-text">Descarga la configuración actual del cargador como un archivo JSON.</p>
+                                <button class="btn btn-primary" id="export-config-btn"><i class="fas fa-file-export me-2"></i>Exportar Configuración</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header"><i class="fas fa-upload me-2"></i>Importar Configuración</div>
+                            <div class="card-body">
+                                <p class="card-text">Sube un archivo JSON para importar la configuración del cargador.</p>
+                                <input type="file" class="form-control mb-3" id="import-config-file" accept=".json">
+                                <button class="btn btn-secondary" id="import-config-btn"><i class="fas fa-file-import me-2"></i>Importar Configuración</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>© 2024 Orange Pi Solar Charger Control. Hecho con ❤️ para tu proyecto.</p>
+    </footer>
+
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+    
+    <script>
+        const API_BASE_URL = '/api';
+        const UPDATE_INTERVAL_MS = 2000; // 2 segundos
+
+        let currentData = {};
+        let currentChart, voltageChart;
+        const chartDataPoints = 60; // Keep 60 data points (2 minutes at 2s interval)
+        const chartLabels = [];
+        const panelCurrentData = [];
+        const batteryCurrentData = [];
+        const batteryVoltageData = [];
+        const panelVoltageData = [];
+
+        // --- Utility Functions ---
+        function showToast(message, type = 'success') {
+            const alertsContainer = document.getElementById('alerts-container');
+            const alertHtml = `
+                <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+            `;
+            const alertElement = document.createElement('div');
+            alertElement.innerHTML = alertHtml;
+            alertsContainer.appendChild(alertElement);
+
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                const bsAlert = bootstrap.Alert.getInstance(alertElement.querySelector('.alert'));
+                if (bsAlert) bsAlert.hide();
+                alertElement.remove(); // Remove from DOM after fading out
+            }, 5000);
+        }
+
+        function formatSecondsToHMS(totalSeconds) {
+            if (totalSeconds < 0) totalSeconds = 0;
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            const seconds = totalSeconds % 60;
+            return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        function formatUptime(totalSeconds) {
+            if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
+            if (totalSeconds < 3600) return `${Math.round(totalSeconds / 60)}m`;
+            if (totalSeconds < 86400) return `${Math.round(totalSeconds / 3600)}h`;
+            return `${Math.round(totalSeconds / 86400)}d`;
+        }
+
+        // --- UI Update Functions ---
+        function updateDashboardUI() {
+            document.getElementById('battery-voltage').textContent = currentData.voltageBatterySensor2.toFixed(2);
+            document.getElementById('panel-voltage').textContent = currentData.voltagePanel.toFixed(2);
+            document.getElementById('panel-current').textContent = (currentData.panelToBatteryCurrent / 1000).toFixed(2);
+            document.getElementById('load-current').textContent = (currentData.batteryToLoadCurrent / 1000).toFixed(2);
+            document.getElementById('net-current').textContent = (currentData.netCurrent / 1000).toFixed(2);
+            document.getElementById('temperature').textContent = currentData.temperature.toFixed(1);
+
+            document.getElementById('charge-state').textContent = currentData.chargeState;
+            document.getElementById('charge-state').className = `badge bg-${getChargeStateColor(currentData.chargeState)}`;
+            
+            let soc = Math.max(0, Math.min(100, Math.round(currentData.estimatedSOC)));
+            document.getElementById('estimated-soc').textContent = soc;
+            const socProgressBar = document.getElementById('soc-progress-bar');
+            socProgressBar.style.width = `${soc}%`;
+            socProgressBar.setAttribute('aria-valuenow', soc);
+            socProgressBar.className = `progress-bar bg-${getSocColor(soc)}`;
+
+            document.getElementById('accumulated-ah').textContent = currentData.accumulatedAh.toFixed(2);
+            document.getElementById('calculated-absorption-hours').textContent = currentData.calculatedAbsorptionHours.toFixed(1);
+
+            document.getElementById('load-control-state').textContent = currentData.loadControlState ? 'Activa' : 'Inactiva';
+            document.getElementById('load-control-state').className = `badge bg-${currentData.loadControlState ? 'success' : 'danger'}`;
+            
+            document.getElementById('temporary-load-off').textContent = currentData.temporaryLoadOff ? 'SÍ' : 'NO';
+            document.getElementById('temporary-load-off').className = `badge bg-${currentData.temporaryLoadOff ? 'warning' : 'secondary'}`;
+            
+            document.getElementById('load-off-remaining-time').textContent = formatSecondsToHMS(currentData.loadOffRemainingSeconds);
+
+            document.getElementById('led-solar-state').textContent = currentData.ledSolarState ? 'Encendido' : 'Apagado';
+            document.getElementById('led-solar-state').className = `badge bg-${currentData.ledSolarState ? 'success' : 'secondary'}`;
+
+            document.getElementById('custom-note').textContent = currentData.notaPersonalizada || 'N/A';
+            document.getElementById('firmware-version-display').textContent = `v${currentData.firmware_version}`;
+
+            // Update connection status in navbar
+            const statusIndicator = document.getElementById('connection-status-indicator');
+            if (currentData.connected && currentData.seconds_since_update < 5) {
+                statusIndicator.className = 'status-indicator connected';
+            } else if (currentData.connected && currentData.seconds_since_update >= 5) {
+                statusIndicator.className = 'status-indicator warning';
+            } else {
+                statusIndicator.className = 'status-indicator disconnected';
+            }
+            document.getElementById('last-update-time').textContent = currentData.last_update ? new Date(currentData.last_update).toLocaleTimeString() : 'N/A';
+            document.getElementById('server-uptime-display').textContent = formatUptime(currentData.server_uptime);
+        }
+
+        function getChargeStateColor(state) {
+            switch (state) {
+                case 'BULK': return 'info';
+                case 'ABSORPTION': return 'primary';
+                case 'FLOAT': return 'success';
+                case 'EQUALIZATION': return 'warning';
+                case 'IDLE': return 'secondary';
+                case 'OVER_VOLTAGE':
+                case 'LOW_VOLTAGE_DISCONNECT':
+                case 'OVER_TEMPERATURE':
+                    return 'danger';
+                default: return 'dark';
+            }
+        }
+
+        function getSocColor(soc) {
+            if (soc <= 20) return 'danger';
+            if (soc <= 50) return 'warning';
+            return 'success';
+        }
+
+        function updateConfigUI() {
+            // Get all inputs with data-param attribute
+            document.querySelectorAll('#configuration-tab-pane [data-param]').forEach(input => {
+                const paramName = input.dataset.param;
+                if (currentData.hasOwnProperty(paramName)) {
+                    if (input.type === 'checkbox') {
+                        input.checked = currentData[paramName];
+                    } else if (input.tagName === 'TEXTAREA') {
+                        input.value = currentData[paramName];
+                    } else {
+                        input.value = currentData[paramName];
+                    }
+                }
+            });
+        }
+
+        function updateLoadControlUI() {
+            document.getElementById('current-load-status').textContent = currentData.loadControlState ? 'Carga Activa' : 'Carga Inactiva';
+            document.getElementById('current-load-status').className = `badge bg-${currentData.loadControlState ? 'success' : 'danger'}`;
+        }
+
+        function updateSystemInfoUI(sysInfo) {
+            document.getElementById('sysinfo-hostname').textContent = sysInfo.hostname || 'N/A';
+            document.getElementById('sysinfo-platform').textContent = sysInfo.platform || 'N/A';
+            document.getElementById('sysinfo-python').textContent = sysInfo.python_version || 'N/A';
+            document.getElementById('sysinfo-cpu').textContent = sysInfo.cpu_percent ? `${sysInfo.cpu_percent.toFixed(1)}%` : 'N/A';
+            document.getElementById('sysinfo-memory').textContent = sysInfo.memory_percent ? `${sysInfo.memory_percent.toFixed(1)}%` : 'N/A';
+            document.getElementById('sysinfo-disk').textContent = sysInfo.disk_percent ? `${sysInfo.disk_percent.toFixed(1)}%` : 'N/A';
+            document.getElementById('sysinfo-boot-time').textContent = sysInfo.boot_time ? new Date(sysInfo.boot_time).toLocaleString() : 'N/A';
+            document.getElementById('sysinfo-server-uptime').textContent = sysInfo.server_uptime ? formatUptime(sysInfo.server_uptime) : 'N/A';
+        }
+
+        // --- API Call Functions ---
+        async function fetchData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/data`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                currentData = data; // Update global data
+                updateDashboardUI();
+                updateCharts();
+                updateLoadControlUI(); // Refresh load control status
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                // Set connected status to false if there's a communication error
+                currentData.connected = false;
+                document.getElementById('connection-status-indicator').className = 'status-indicator disconnected';
+                document.getElementById('last-update-time').textContent = 'Error';
+            }
+        }
+
+        async function setParameter(paramName, value) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/set_parameter`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ parameter: paramName, value: value })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    // Refresh data after successful update
+                    await fetchData(); 
+                } else {
+                    showToast(`Error: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error(`Error setting ${paramName}:`, error);
+                showToast(`Error al enviar comando: ${error.message}`, 'danger');
+            }
+        }
+
+        async function toggleLoad(hours, minutes, seconds) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/toggle_load`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hours, minutes, seconds })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(`Carga apagada por ${formatSecondsToHMS(result.duration)}`, 'success');
+                    await fetchData();
+                } else {
+                    showToast(`Error al apagar carga: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error('Error toggling load:', error);
+                showToast(`Error al enviar comando: ${error.message}`, 'danger');
+            }
+        }
+
+        async function cancelTempOff() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/cancel_temp_off`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(`Apagado temporal cancelado: ${result.message}`, 'success');
+                    await fetchData();
+                } else {
+                    showToast(`Error al cancelar apagado: ${result.error}`, 'danger');
+                }
+            } catch (error) {
+                console.error('Error canceling temporary off:', error);
+                showToast(`Error al enviar comando: ${error.message}`, 'danger');
+            }
+        }
+
+        async function getSystemInfo() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/system_info`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const sysInfo = await response.json();
+                updateSystemInfoUI(sysInfo);
+            } catch (error) {
+                console.error('Error fetching system info:', error);
+                showToast(`Error al obtener info del sistema: ${error.message}`, 'danger');
+            }
+        }
+
+        async function getLogs(lines) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logs?lines=${lines}`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const logData = await response.json();
+                document.getElementById('log-content').textContent = logData.logs;
+                document.getElementById('log-content').scrollTop = document.getElementById('log-content').scrollHeight; // Scroll to bottom
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+                document.getElementById('log-content').textContent = `Error al cargar logs: ${error.message}`;
+                showToast(`Error al obtener logs: ${error.message}`, 'danger');
+            }
+        }
+
+        async function exportConfig() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/export_config`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                const blob = await response.blob();
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'config.json';
+                if (contentDisposition && contentDisposition.indexOf('filename=') !== -1) {
+                    filename = contentDisposition.split('filename=')[1].replace(/['"]/g, '');
+                }
+                
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                showToast('Configuración exportada correctamente.', 'success');
+            } catch (error) {
+                console.error('Error exporting config:', error);
+                showToast(`Error al exportar configuración: ${error.message}`, 'danger');
+            }
+        }
+
+        async function importConfig(file) {
+            if (!file) {
+                showToast('Por favor, selecciona un archivo.', 'warning');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/import_config`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    if (result.errors.length > 0) {
+                        showToast(`Advertencias al importar: ${result.errors.join(', ')}`, 'warning');
+                    }
+                    await fetchData(); // Re-fetch to update UI with new config
+                } else {
+                    showToast(`Error al importar: ${result.error || 'Desconocido'}`, 'danger');
+                    if (result.errors && result.errors.length > 0) {
+                        showToast(`Errores: ${result.errors.join(', ')}`, 'danger');
+                    }
+                }
+            } catch (error) {
+                console.error('Error importing config:', error);
+                showToast(`Error de red o servidor al importar: ${error.message}`, 'danger');
+            }
+        }
+
+        // --- Chart.js Initialization and Update ---
+        function initializeCharts() {
+            const commonChartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 }, // Disable animation for real-time updates
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            unit: 'second',
+                            displayFormats: {
+                                second: 'HH:mm:ss'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Tiempo'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Valor'
+                        }
+                    }
+                }
+            };
+
+            const currentCtx = document.getElementById('currentChart').getContext('2d');
+            currentChart = new Chart(currentCtx, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: [
+                        {
+                            label: 'Panel (A)',
+                            data: panelCurrentData,
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'Carga (A)',
+                            data: batteryCurrentData,
+                            borderColor: 'rgb(255, 99, 132)',
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    ...commonChartOptions,
+                    scales: {
+                        ...commonChartOptions.scales,
+                        y: {
+                            ...commonChartOptions.scales.y,
+                            title: {
+                                display: true,
+                                text: 'Corriente (A)'
+                            }
+                        }
+                    }
+                }
+            });
+
+            const voltageCtx = document.getElementById('voltageChart').getContext('2d');
+            voltageChart = new Chart(voltageCtx, {
+                type: 'line',
+                data: {
+                    labels: chartLabels,
+                    datasets: [
+                        {
+                            label: 'Batería (V)',
+                            data: batteryVoltageData,
+                            borderColor: 'rgb(54, 162, 235)',
+                            tension: 0.1,
+                            fill: false
+                        },
+                        {
+                            label: 'Panel (V)',
+                            data: panelVoltageData,
+                            borderColor: 'rgb(255, 205, 86)',
+                            tension: 0.1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    ...commonChartOptions,
+                    scales: {
+                        ...commonChartOptions.scales,
+                        y: {
+                            ...commonChartOptions.scales.y,
+                            title: {
+                                display: true,
+                                text: 'Voltaje (V)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateCharts() {
+            const now = new Date();
+            const timeLabel = now.toLocaleTimeString();
+
+            // Add new data
+            chartLabels.push(timeLabel);
+            panelCurrentData.push(currentData.panelToBatteryCurrent / 1000);
+            batteryCurrentData.push(currentData.batteryToLoadCurrent / 1000);
+            batteryVoltageData.push(currentData.voltageBatterySensor2);
+            panelVoltageData.push(currentData.voltagePanel);
+
+            // Remove old data if exceeding limit
+            if (chartLabels.length > chartDataPoints) {
+                chartLabels.shift();
+                panelCurrentData.shift();
+                batteryCurrentData.shift();
+                batteryVoltageData.shift();
+                panelVoltageData.shift();
+            }
+
+            // Update charts
+            if (currentChart) currentChart.update();
+            if (voltageChart) voltageChart.update();
+        }
+
+        // --- Event Listeners and Initial Load ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeCharts();
+            fetchData(); // Initial data fetch
+            setInterval(fetchData, UPDATE_INTERVAL_MS); // Poll for updates
+
+            // --- Configuration Tab Handlers ---
+            document.querySelectorAll('.save-param-btn').forEach(button => {
+                button.addEventListener('click', async () => {
+                    const paramsToSave = button.dataset.param.split(',');
+                    for (const paramName of paramsToSave) {
+                        const inputElement = document.getElementById(paramName);
+                        if (inputElement) {
+                            let value;
+                            if (inputElement.type === 'checkbox') {
+                                value = inputElement.checked;
+                            } else {
+                                value = inputElement.value;
+                            }
+                            await setParameter(paramName, value);
+                        }
+                    }
+                });
+            });
+
+            // Make config sections collapsable
+            document.querySelectorAll('.card.config-section .card-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    const parentCard = header.closest('.card.config-section');
+                    parentCard.classList.toggle('expanded');
+                    const icon = header.querySelector('.fa-chevron-down, .fa-chevron-up');
+                    if (icon) {
+                        icon.classList.toggle('fa-chevron-down');
+                        icon.classList.toggle('fa-chevron-up');
+                    }
+                });
+            });
+
+
+            // Ensure config UI is updated when the tab is shown
+            document.getElementById('configuration-tab').addEventListener('shown.bs.tab', updateConfigUI);
+
+
+            // --- Load Control Tab Handlers ---
+            document.getElementById('toggle-load-btn').addEventListener('click', () => {
+                const hours = parseInt(document.getElementById('loadOffHours').value) || 0;
+                const minutes = parseInt(document.getElementById('loadOffMinutes').value) || 0;
+                const seconds = parseInt(document.getElementById('loadOffSeconds').value) || 0;
+                toggleLoad(hours, minutes, seconds);
+            });
+
+            document.getElementById('cancel-temp-off-btn').addEventListener('click', () => {
+                cancelTempOff();
+            });
+
+            // --- System & Logs Tab Handlers ---
+            document.getElementById('refresh-sysinfo-btn').addEventListener('click', getSystemInfo);
+            document.getElementById('refresh-logs-btn').addEventListener('click', () => {
+                const lines = parseInt(document.getElementById('logLines').value) || 100;
+                getLogs(lines);
+            });
+            // Fetch system info and logs when tab is activated for the first time
+            let sysInfoFetched = false;
+            let logsFetched = false;
+            document.getElementById('system-logs-tab').addEventListener('shown.bs.tab', () => {
+                if (!sysInfoFetched) { getSystemInfo(); sysInfoFetched = true; }
+                if (!logsFetched) { 
+                    const lines = parseInt(document.getElementById('logLines').value) || 100;
+                    getLogs(lines); 
+                    logsFetched = true; 
+                }
+            });
+
+
+            // --- Tools Tab Handlers ---
+            document.getElementById('export-config-btn').addEventListener('click', exportConfig);
+            document.getElementById('import-config-btn').addEventListener('click', () => {
+                const fileInput = document.getElementById('import-config-file');
+                if (fileInput.files.length > 0) {
+                    importConfig(fileInput.files[0]);
+                } else {
+                    showToast('Por favor, selecciona un archivo para importar.', 'warning');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
