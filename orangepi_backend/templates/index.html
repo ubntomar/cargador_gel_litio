@@ -305,6 +305,129 @@
 
     /* ===== FIN DE ESTILOS DEL CRONÓMETRO ===== */
     
+
+        .night-scheduler {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            border-radius: 15px;
+            padding: 25px;
+            color: white;
+            text-align: center;
+            margin: 20px 0;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        }
+
+        .night-timer {
+            font-size: 2.5rem;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .night-status {
+            font-size: 1.1rem;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 10px 20px;
+            border-radius: 25px;
+            display: inline-block;
+            margin: 10px 0;
+        }
+
+        .schedule-info {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .schedule-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 5px;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .schedule-item h4 {
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+            opacity: 0.8;
+        }
+
+        .schedule-item .time {
+            font-size: 1.5rem;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+
+        .night-active {
+            background: linear-gradient(135deg, #1a252f 0%, #2c3e50 100%);
+            border: 2px solid #3498db;
+        }
+
+        .night-waiting {
+            background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+        }
+
+        .night-disabled {
+            background: linear-gradient(135deg, #7f8c8d 0%, #95a5a6 100%);
+        }
+
+        .night-controls {
+            margin-top: 20px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            margin: 0 10px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #3498db;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        .fallback-icon.moon::before { content: "🌙"; }
+
+        /* ===== FIN PROGRAMACIÓN NOCTURNA ===== */
+
     </style>
 </head>
 <body>
@@ -350,6 +473,11 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tools-tab" data-bs-toggle="tab" data-bs-target="#tools-tab-pane" type="button" role="tab" aria-controls="tools-tab-pane" aria-selected="false">
                     <i class="fas fa-tools me-2 fallback-icon tools"></i>Herramientas
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="night-schedule-tab" data-bs-toggle="tab" data-bs-target="#night-schedule-tab-pane" type="button" role="tab" aria-controls="night-schedule-tab-pane" aria-selected="false">
+                    <i class="fas fa-moon me-2 fallback-icon moon"></i>Programación Nocturna
                 </button>
             </li>
         </ul>
@@ -679,6 +807,159 @@
                     </div>
                 </div>
             </div>
+            <!-- Night Schedule Tab Pane - AGREGAR ANTES DEL CIERRE DE tab-content -->
+            <div class="tab-pane fade" id="night-schedule-tab-pane" role="tabpanel" aria-labelledby="night-schedule-tab">
+                <div class="row">
+                    <!-- Scheduler Principal -->
+                    <div class="col-12 mb-3">
+                        <div class="card">
+                            <div class="card-header">🌙 Programación Automática Nocturna</div>
+                            <div class="card-body">
+                                <div id="night-scheduler" class="night-scheduler night-waiting">
+                                    <h3 style="margin-top: 0;">Apagado Automático Nocturno</h3>
+                                    
+                                    <div class="night-timer" id="night-countdown">
+                                        Calculando...
+                                    </div>
+                                    
+                                    <div class="night-status" id="night-status">
+                                        Esperando medianoche...
+                                    </div>
+
+                                    <div class="schedule-info">
+                                        <div class="schedule-item">
+                                            <h4>🕛 Inicio de Apagado</h4>
+                                            <div class="time" id="display-start-time">00:00</div>
+                                            <small>Medianoche</small>
+                                        </div>
+                                        <div class="schedule-item">
+                                            <h4>⏰ Duración</h4>
+                                            <div class="time" id="display-duration">6:00h</div>
+                                            <small>Horas de apagado</small>
+                                        </div>
+                                        <div class="schedule-item">
+                                            <h4>🌅 Reactivación</h4>
+                                            <div class="time" id="display-end-time">06:00</div>
+                                            <small>Amanecer</small>
+                                        </div>
+                                    </div>
+
+                                    <div class="night-controls">
+                                        <button class="btn btn-warning" id="override-night-btn" style="display: none;">
+                                            🔓 Activar Carga (Override)
+                                        </button>
+                                        <button class="btn btn-danger" id="skip-night-btn">
+                                            ⏭️ Saltar Esta Noche
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Configuración -->
+                    <div class="col-md-8 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header">⚙️ Configuración de Programación Nocturna</div>
+                            <div class="card-body">
+                                <div style="display: flex; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px;">
+                                    <label style="font-weight: bold;">
+                                        Programación automática nocturna:
+                                    </label>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="night-schedule-enabled" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                    <span id="schedule-status-text">Activado</span>
+                                </div>
+
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                                    <div>
+                                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
+                                            🕛 Hora de inicio:
+                                        </label>
+                                        <input type="time" id="night-start-time" value="00:00" class="form-control">
+                                    </div>
+                                    <div>
+                                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
+                                            🌅 Hora de fin:
+                                        </label>
+                                        <input type="time" id="night-end-time" value="06:00" class="form-control">
+                                    </div>
+                                    <div>
+                                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
+                                            📅 Días activos:
+                                        </label>
+                                        <select id="active-days" class="form-control">
+                                            <option value="daily">Todos los días</option>
+                                            <option value="weekdays">Solo lunes a viernes</option>
+                                            <option value="weekends">Solo fines de semana</option>
+                                            <option value="custom">Personalizado</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div id="custom-days" style="display: none; margin-bottom: 20px;">
+                                    <label style="font-weight: bold; display: block; margin-bottom: 10px;">
+                                        Seleccionar días específicos:
+                                    </label>
+                                    <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                                        <label><input type="checkbox" id="day-0" checked> Domingo</label>
+                                        <label><input type="checkbox" id="day-1" checked> Lunes</label>
+                                        <label><input type="checkbox" id="day-2" checked> Martes</label>
+                                        <label><input type="checkbox" id="day-3" checked> Miércoles</label>
+                                        <label><input type="checkbox" id="day-4" checked> Jueves</label>
+                                        <label><input type="checkbox" id="day-5" checked> Viernes</label>
+                                        <label><input type="checkbox" id="day-6" checked> Sábado</label>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <button class="btn btn-primary" id="save-schedule-btn">
+                                        💾 Guardar Configuración
+                                    </button>
+                                    <button class="btn btn-warning" id="test-schedule-btn">
+                                        🧪 Probar Ahora (30 seg)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Estado del Sistema -->
+                    <div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <div class="card-header">📊 Estado del Sistema</div>
+                            <div class="card-body">
+                                <div style="margin-bottom: 15px;">
+                                    <strong>Próximo apagado:</strong><br>
+                                    <span id="next-shutdown" style="font-family: monospace; font-size: 0.9em;">--:--:--</span>
+                                </div>
+                                <div style="margin-bottom: 15px;">
+                                    <strong>Próxima reactivación:</strong><br>
+                                    <span id="next-activation" style="font-family: monospace; font-size: 0.9em;">--:--:--</span>
+                                </div>
+                                <div style="margin-bottom: 15px;">
+                                    <strong>Estado actual:</strong><br>
+                                    <span id="current-system-status" class="badge bg-success">Normal</span>
+                                </div>
+                                <div style="margin-bottom: 15px;">
+                                    <strong>Última ejecución:</strong><br>
+                                    <span id="last-execution" style="font-family: monospace; font-size: 0.9em;">Nunca</span>
+                                </div>
+
+                                <div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                                    <strong style="font-size: 0.9em;">📝 Últimos eventos:</strong>
+                                    <div id="event-log" style="margin-top: 10px; max-height: 150px; overflow-y: auto; font-family: monospace; font-size: 0.7em;">
+                                        <div>Sistema iniciado</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </div>
 
@@ -910,6 +1191,414 @@
                 }
             }
         }
+
+
+        // ===== AGREGAR DESPUÉS DE LA CLASE COUNTDOWNMANAGER =====
+
+        class NightScheduler {
+            constructor() {
+                this.enabled = true;
+                this.startTime = '00:00';
+                this.endTime = '06:00';
+                this.activeDays = 'daily';
+                this.isActive = false;
+                this.nextShutdown = null;
+                this.nextActivation = null;
+                this.checkInterval = null;
+                this.countdownInterval = null;
+                this.skippedTonight = false;
+                this.lastExecution = null;
+                
+                this.loadConfiguration();
+            }
+
+            loadConfiguration() {
+                const saved = localStorage.getItem('nightScheduleConfig');
+                if (saved) {
+                    try {
+                        const config = JSON.parse(saved);
+                        this.enabled = config.enabled !== false;
+                        this.startTime = config.startTime || '00:00';
+                        this.endTime = config.endTime || '06:00';
+                        this.activeDays = config.activeDays || 'daily';
+                        this.lastExecution = config.lastExecution || null;
+                    } catch (e) {
+                        console.error('Error loading night schedule:', e);
+                    }
+                }
+            }
+
+            saveConfiguration() {
+                const config = {
+                    enabled: this.enabled,
+                    startTime: this.startTime,
+                    endTime: this.endTime,
+                    activeDays: this.activeDays,
+                    lastExecution: this.lastExecution
+                };
+                localStorage.setItem('nightScheduleConfig', JSON.stringify(config));
+                this.logEvent('Configuración guardada');
+            }
+
+            calculateNextEvents() {
+                if (!this.enabled) {
+                    this.nextShutdown = null;
+                    this.nextActivation = null;
+                    return;
+                }
+
+                const now = new Date();
+                const [startHour, startMin] = this.startTime.split(':').map(Number);
+                const [endHour, endMin] = this.endTime.split(':').map(Number);
+
+                // Calcular próximo apagado
+                let nextShutdown = new Date();
+                nextShutdown.setHours(startHour, startMin, 0, 0);
+                
+                // Si ya pasó la hora de hoy, ir al día siguiente
+                if (nextShutdown <= now) {
+                    nextShutdown.setDate(nextShutdown.getDate() + 1);
+                    nextShutdown.setHours(startHour, startMin, 0, 0);
+                }
+
+                // Calcular próxima reactivación
+                let nextActivation = new Date(nextShutdown);
+                nextActivation.setHours(endHour, endMin, 0, 0);
+                
+                // Si el fin es al día siguiente (ej: 00:00 - 06:00)
+                if (endHour < startHour || (endHour === startHour && endMin < startMin)) {
+                    nextActivation.setDate(nextActivation.getDate() + 1);
+                }
+
+                this.nextShutdown = nextShutdown;
+                this.nextActivation = nextActivation;
+            }
+
+            startScheduler() {
+                this.calculateNextEvents();
+                
+                // Verificar cada minuto
+                this.checkInterval = setInterval(() => {
+                    this.checkSchedule();
+                    this.updateUI();
+                }, 60000);
+
+                // Actualizar countdown cada segundo
+                this.countdownInterval = setInterval(() => {
+                    this.updateCountdown();
+                }, 1000);
+
+                this.logEvent('Programación nocturna iniciada');
+            }
+
+            checkSchedule() {
+                if (!this.enabled || this.skippedTonight) return;
+
+                const now = new Date();
+                
+                // Verificar si debe iniciar apagado
+                if (this.nextShutdown && now >= this.nextShutdown && !this.isActive) {
+                    this.executeShutdown();
+                }
+                
+                // Verificar si debe reactivar
+                if (this.nextActivation && now >= this.nextActivation && this.isActive) {
+                    this.executeActivation();
+                }
+
+                // Recalcular eventos si es necesario
+                if (now > this.nextActivation) {
+                    this.calculateNextEvents();
+                    this.skippedTonight = false;
+                }
+            }
+
+            async executeShutdown() {
+                this.isActive = true;
+                this.lastExecution = new Date().toISOString();
+                this.logEvent(`🌙 Iniciando apagado nocturno automático`);
+                
+                try {
+                    const durationSeconds = this.getDurationInSeconds();
+                    const hours = Math.floor(durationSeconds / 3600);
+                    const minutes = Math.floor((durationSeconds % 3600) / 60);
+                    const seconds = durationSeconds % 60;
+                    
+                    await toggleLoad(hours, minutes, seconds);
+                    console.log('🌙 Apagado nocturno ejecutado correctamente');
+                } catch (error) {
+                    console.error('Error ejecutando apagado nocturno:', error);
+                }
+                
+                this.updateSchedulerDisplay();
+                
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('🌙 Apagado Nocturno Iniciado', {
+                        body: `Carga apagada hasta las ${this.endTime}`,
+                        icon: '/favicon.ico'
+                    });
+                }
+            }
+
+            async executeActivation() {
+                this.isActive = false;
+                this.logEvent(`🌅 Reactivando carga automáticamente`);
+                
+                try {
+                    await cancelTempOff();
+                    console.log('🌅 Reactivación automática ejecutada');
+                } catch (error) {
+                    console.error('Error ejecutando reactivación:', error);
+                }
+                
+                this.calculateNextEvents();
+                this.updateSchedulerDisplay();
+                
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('🌅 Carga Reactivada', {
+                        body: 'El apagado nocturno ha terminado',
+                        icon: '/favicon.ico'
+                    });
+                }
+            }
+
+            getDurationInSeconds() {
+                const [startHour, startMin] = this.startTime.split(':').map(Number);
+                const [endHour, endMin] = this.endTime.split(':').map(Number);
+                
+                let duration = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+                if (duration <= 0) duration += 24 * 60;
+                
+                return duration * 60;
+            }
+
+            updateCountdown() {
+                const countdownEl = document.getElementById('night-countdown');
+                if (!countdownEl) return;
+
+                const now = new Date();
+                let targetTime = this.isActive ? this.nextActivation : this.nextShutdown;
+
+                if (targetTime) {
+                    const diff = targetTime - now;
+                    if (diff > 0) {
+                        const hours = Math.floor(diff / (1000 * 60 * 60));
+                        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                        countdownEl.textContent = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                    } else {
+                        countdownEl.textContent = '00:00:00';
+                    }
+                } else {
+                    countdownEl.textContent = 'Desactivado';
+                }
+            }
+
+            updateSchedulerDisplay() {
+                const scheduler = document.getElementById('night-scheduler');
+                const status = document.getElementById('night-status');
+                const overrideBtn = document.getElementById('override-night-btn');
+
+                if (!scheduler || !status) return;
+
+                if (!this.enabled) {
+                    scheduler.className = 'night-scheduler night-disabled';
+                    status.textContent = '❌ Programación desactivada';
+                    if (overrideBtn) overrideBtn.style.display = 'none';
+                } else if (this.isActive) {
+                    scheduler.className = 'night-scheduler night-active';
+                    status.textContent = '🌙 Apagado nocturno activo';
+                    if (overrideBtn) overrideBtn.style.display = 'inline-block';
+                } else if (this.skippedTonight) {
+                    scheduler.className = 'night-scheduler night-disabled';
+                    status.textContent = '⏭️ Saltado para esta noche';
+                    if (overrideBtn) overrideBtn.style.display = 'none';
+                } else {
+                    scheduler.className = 'night-scheduler night-waiting';
+                    status.textContent = '⏰ Esperando hora programada';
+                    if (overrideBtn) overrideBtn.style.display = 'none';
+                }
+
+                // Actualizar horarios mostrados
+                const displayStartTime = document.getElementById('display-start-time');
+                const displayEndTime = document.getElementById('display-end-time');
+                const displayDuration = document.getElementById('display-duration');
+
+                if (displayStartTime) displayStartTime.textContent = this.startTime;
+                if (displayEndTime) displayEndTime.textContent = this.endTime;
+                if (displayDuration) {
+                    const duration = this.getDurationInSeconds() / 3600;
+                    displayDuration.textContent = `${duration.toFixed(1)}h`;
+                }
+            }
+
+            updateUI() {
+                // Actualizar próximos eventos
+                const nextShutdownEl = document.getElementById('next-shutdown');
+                const nextActivationEl = document.getElementById('next-activation');
+
+                if (nextShutdownEl) {
+                    nextShutdownEl.textContent = this.nextShutdown ? 
+                        this.nextShutdown.toLocaleString() : 'No programado';
+                }
+
+                if (nextActivationEl) {
+                    nextActivationEl.textContent = this.nextActivation ? 
+                        this.nextActivation.toLocaleString() : 'No programado';
+                }
+
+                // Actualizar estado del sistema
+                const statusEl = document.getElementById('current-system-status');
+                if (statusEl) {
+                    if (this.isActive) {
+                        statusEl.textContent = 'Apagado Nocturno';
+                        statusEl.className = 'badge bg-warning';
+                    } else if (!this.enabled) {
+                        statusEl.textContent = 'Desactivado';
+                        statusEl.className = 'badge bg-secondary';
+                    } else {
+                        statusEl.textContent = 'Normal';
+                        statusEl.className = 'badge bg-success';
+                    }
+                }
+
+                // Actualizar última ejecución
+                const lastExecutionEl = document.getElementById('last-execution');
+                if (lastExecutionEl) {
+                    lastExecutionEl.textContent = this.lastExecution ? 
+                        new Date(this.lastExecution).toLocaleString() : 'Nunca';
+                }
+
+                this.updateSchedulerDisplay();
+            }
+
+            initializeUI() {
+                // Configurar toggle principal
+                const enabledToggle = document.getElementById('night-schedule-enabled');
+                if (enabledToggle) {
+                    enabledToggle.checked = this.enabled;
+                    enabledToggle.addEventListener('change', (e) => {
+                        this.enabled = e.target.checked;
+                        const statusText = document.getElementById('schedule-status-text');
+                        if (statusText) {
+                            statusText.textContent = this.enabled ? 'Activado' : 'Desactivado';
+                        }
+                        this.updateSchedulerDisplay();
+                    });
+                }
+
+                // Configurar horarios
+                const startTimeInput = document.getElementById('night-start-time');
+                const endTimeInput = document.getElementById('night-end-time');
+                if (startTimeInput) startTimeInput.value = this.startTime;
+                if (endTimeInput) endTimeInput.value = this.endTime;
+
+                // Event listeners para botones
+                const saveBtn = document.getElementById('save-schedule-btn');
+                if (saveBtn) {
+                    saveBtn.addEventListener('click', () => {
+                        this.updateConfigFromUI();
+                        this.saveConfiguration();
+                        this.calculateNextEvents();
+                        this.updateUI();
+                        showToast('✅ Configuración de programación nocturna guardada', 'success');
+                    });
+                }
+
+                const testBtn = document.getElementById('test-schedule-btn');
+                if (testBtn) {
+                    testBtn.addEventListener('click', () => {
+                        this.testSchedule();
+                    });
+                }
+
+                const skipBtn = document.getElementById('skip-night-btn');
+                if (skipBtn) {
+                    skipBtn.addEventListener('click', () => {
+                        this.skipTonight();
+                    });
+                }
+
+                const overrideBtn = document.getElementById('override-night-btn');
+                if (overrideBtn) {
+                    overrideBtn.addEventListener('click', () => {
+                        this.overrideNightShutdown();
+                    });
+                }
+            }
+
+            updateConfigFromUI() {
+                const enabledToggle = document.getElementById('night-schedule-enabled');
+                const startTimeInput = document.getElementById('night-start-time');
+                const endTimeInput = document.getElementById('night-end-time');
+
+                if (enabledToggle) this.enabled = enabledToggle.checked;
+                if (startTimeInput) this.startTime = startTimeInput.value;
+                if (endTimeInput) this.endTime = endTimeInput.value;
+            }
+
+            skipTonight() {
+                this.skippedTonight = true;
+                this.logEvent('⏭️ Apagado nocturno saltado para esta noche');
+                this.updateSchedulerDisplay();
+                showToast('✅ Apagado nocturno saltado para esta noche', 'info');
+            }
+
+            async overrideNightShutdown() {
+                if (this.isActive) {
+                    this.isActive = false;
+                    this.logEvent('🔓 Override: Carga reactivada manualmente');
+                    
+                    try {
+                        await cancelTempOff();
+                        console.log('🔓 Override ejecutado correctamente');
+                    } catch (error) {
+                        console.error('Error en override:', error);
+                    }
+                    
+                    this.updateSchedulerDisplay();
+                }
+            }
+
+            async testSchedule() {
+                if (confirm('¿Probar el apagado nocturno por 30 segundos?')) {
+                    this.logEvent('🧪 Prueba de apagado nocturno (30 segundos)');
+                    
+                    try {
+                        await toggleLoad(0, 0, 30);
+                        showToast('🧪 Prueba iniciada - 30 segundos de apagado', 'info');
+                    } catch (error) {
+                        console.error('Error en prueba:', error);
+                        showToast('❌ Error en la prueba', 'danger');
+                    }
+                }
+            }
+
+            logEvent(message) {
+                const log = document.getElementById('event-log');
+                if (log) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    const entry = document.createElement('div');
+                    entry.textContent = `[${timestamp}] ${message}`;
+                    log.appendChild(entry);
+                    log.scrollTop = log.scrollHeight;
+                    
+                    // Mantener solo últimas 20 entradas
+                    while (log.children.length > 20) {
+                        log.removeChild(log.firstChild);
+                    }
+                }
+                
+                console.log(`[NightScheduler] ${message}`);
+            }
+        }
+
+        // Crear instancia global del night scheduler
+        const nightScheduler = new NightScheduler();
+
+        // ===== FIN DE LA CLASE NIGHTSCHEDULER =====
+
+
 
         // Crear instancia global del countdown manager
         const countdownManager = new CountdownManager();
@@ -1552,6 +2241,28 @@
             
             console.log('✅ Cronómetro inicializado correctamente');
 
+        
+            // Inicializar night scheduler cuando se cargue el tab
+            let nightSchedulerInitialized = false;
+            const nightScheduleTab = document.getElementById('night-schedule-tab');
+            if (nightScheduleTab) {
+                nightScheduleTab.addEventListener('click', () => {
+                    if (!nightSchedulerInitialized) {
+                        setTimeout(() => {
+                            nightScheduler.initializeUI();
+                            nightScheduler.updateUI();
+                            nightSchedulerInitialized = true;
+                            console.log('✅ Night Scheduler UI inicializado');
+                        }, 100);
+                    }
+                });
+            }
+            
+            // Inicializar inmediatamente el scheduler (sin UI)
+            nightScheduler.startScheduler();
+            
+            console.log('✅ Sistema de programación nocturna cargado');
+            
 
 
         });
