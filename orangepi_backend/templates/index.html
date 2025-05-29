@@ -521,9 +521,59 @@
                 </div>
             </div>
 
+
             <!-- Load Control Tab Pane -->
             <div class="tab-pane fade" id="load-control-tab-pane" role="tabpanel" aria-labelledby="load-control-tab">
                 <div class="row">
+                    <!-- Cronómetro Visual -->
+                    <div class="col-12 mb-3">
+                        <div class="card">
+                            <div class="card-header">⏰ Cronómetro de Apagado Temporal</div>
+                            <div class="card-body">
+                                <div id="countdown-display" class="countdown-container countdown-inactive">
+                                    <div class="countdown-label">Tiempo restante para reactivación</div>
+                                    
+                                    <!-- Cronómetro circular con SVG -->
+                                    <svg class="progress-ring" width="120" height="120">
+                                        <circle id="progress-ring-circle" class="progress-ring-circle" 
+                                                stroke-dasharray="314" 
+                                                stroke-dashoffset="314" 
+                                                cx="60" cy="60" r="50">
+                                        </circle>
+                                    </svg>
+                                    
+                                    <div id="countdown-timer" class="countdown-timer">00:00:00</div>
+                                    <div id="countdown-status" class="countdown-status">Carga Activa</div>
+                                    
+                                    <div class="countdown-controls">
+                                        <button id="visual-cancel-countdown-btn" style="display: none;">
+                                            ❌ Cancelar Apagado
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Información adicional -->
+                                <div class="row mt-3">
+                                    <div class="col-md-6">
+                                        <small class="text-muted">
+                                            <strong>Tiempo total programado:</strong> <span id="total-programmed-time">00:00:00</span><br>
+                                            <strong>Tiempo transcurrido:</strong> <span id="elapsed-time">00:00:00</span><br>
+                                            <strong>Progreso:</strong> <span id="progress-percentage">0%</span>
+                                        </small>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <small class="text-muted">
+                                            <strong>Programado:</strong> <span id="scheduled-time">--</span><br>
+                                            <strong>Finaliza:</strong> <span id="end-time">--</span><br>
+                                            <strong>Estado:</strong> <span id="countdown-load-status">Normal</span>
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Controles originales -->
                     <div class="col-md-6 mb-3">
                         <div class="card h-100">
                             <div class="card-header">⏰ Apagar Carga Temporalmente</div>
@@ -555,11 +605,20 @@
                                 <button class="btn btn-success" id="cancel-temp-off-btn">✅ Reactivar Carga</button>
                                 <hr>
                                 <p class="card-text"><strong>Estado Actual de Carga:</strong> <span id="current-load-status" class="badge bg-secondary">Cargando...</span></p>
+                                
+                                <!-- Información adicional del sistema -->
+                                <div class="mt-3">
+                                    <small class="text-muted">
+                                        <strong>Tiempo restante del servidor:</strong> <span id="load-off-remaining-time">00:00:00</span><br>
+                                        <strong>Apagado temporal activo:</strong> <span id="temporary-load-off" class="badge bg-secondary">--</span>
+                                    </small>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
+
 
             <!-- System & Logs Tab Pane -->
             <div class="tab-pane fade" id="system-logs-tab-pane" role="tabpanel" aria-labelledby="system-logs-tab">
@@ -644,6 +703,220 @@
         const panelVoltageData = [];
 
         // --- Utility Functions ---
+        
+        
+        // ===== AGREGAR DESPUÉS DE LAS VARIABLES GLOBALES EXISTENTES =====
+
+        // Clase para manejar el cronómetro visual
+        class CountdownManager {
+            constructor() {
+                this.countdownInterval = null;
+                this.totalDurationSeconds = 0;
+                this.remainingSeconds = 0;
+                this.startTime = null;
+                this.scheduledEndTime = null;
+            }
+
+            // Función para formatear tiempo
+            formatTime(seconds) {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+            }
+
+            // Función para actualizar el cronómetro visual
+            updateCountdownDisplay() {
+                const timerElement = document.getElementById('countdown-timer');
+                const statusElement = document.getElementById('countdown-status');
+                const containerElement = document.getElementById('countdown-display');
+                const cancelBtn = document.getElementById('visual-cancel-countdown-btn');
+                const progressRing = document.getElementById('progress-ring-circle');
+                
+                if (!timerElement) return; // Salir si no existe el elemento
+                
+                // Actualizar tiempo restante
+                timerElement.textContent = this.formatTime(this.remainingSeconds);
+                
+                // Actualizar información adicional
+                const totalProgrammedEl = document.getElementById('total-programmed-time');
+                const elapsedTimeEl = document.getElementById('elapsed-time');
+                const progressPercentageEl = document.getElementById('progress-percentage');
+                const scheduledTimeEl = document.getElementById('scheduled-time');
+                const endTimeEl = document.getElementById('end-time');
+                const countdownLoadStatusEl = document.getElementById('countdown-load-status');
+                
+                if (totalProgrammedEl) totalProgrammedEl.textContent = this.formatTime(this.totalDurationSeconds);
+                if (elapsedTimeEl) elapsedTimeEl.textContent = this.formatTime(this.totalDurationSeconds - this.remainingSeconds);
+                
+                const progress = this.totalDurationSeconds > 0 ? ((this.totalDurationSeconds - this.remainingSeconds) / this.totalDurationSeconds) * 100 : 0;
+                if (progressPercentageEl) progressPercentageEl.textContent = `${Math.round(progress)}%`;
+                
+                // Actualizar anillo de progreso
+                if (progressRing) {
+                    const circumference = 2 * Math.PI * 50; // radio = 50
+                    const offset = circumference - (progress / 100) * circumference;
+                    progressRing.style.strokeDashoffset = offset;
+                }
+                
+                // Actualizar horarios
+                if (this.startTime && scheduledTimeEl) {
+                    scheduledTimeEl.textContent = new Date(this.startTime).toLocaleTimeString();
+                }
+                if (this.scheduledEndTime && endTimeEl) {
+                    endTimeEl.textContent = new Date(this.scheduledEndTime).toLocaleTimeString();
+                }
+                
+                // Actualizar estados visuales
+                if (this.remainingSeconds <= 0) {
+                    // Carga activa
+                    if (statusElement) statusElement.textContent = '✅ Carga Activa';
+                    if (containerElement) containerElement.className = 'countdown-container countdown-inactive';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                    if (countdownLoadStatusEl) countdownLoadStatusEl.textContent = 'Normal';
+                    
+                    if (this.countdownInterval) {
+                        clearInterval(this.countdownInterval);
+                        this.countdownInterval = null;
+                    }
+                } else if (this.remainingSeconds <= 60) {
+                    // Estado crítico (último minuto)
+                    if (statusElement) statusElement.textContent = '🚨 ¡Últimos segundos!';
+                    if (containerElement) containerElement.className = 'countdown-container countdown-critical';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    if (countdownLoadStatusEl) countdownLoadStatusEl.textContent = 'Crítico';
+                } else if (this.remainingSeconds <= 300) {
+                    // Estado de advertencia (últimos 5 minutos)
+                    if (statusElement) statusElement.textContent = '⚠️ Carga Temporalmente Apagada';
+                    if (containerElement) containerElement.className = 'countdown-container countdown-warning';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    if (countdownLoadStatusEl) countdownLoadStatusEl.textContent = 'Advertencia';
+                } else {
+                    // Estado normal
+                    if (statusElement) statusElement.textContent = '⏸️ Carga Temporalmente Apagada';
+                    if (containerElement) containerElement.className = 'countdown-container countdown-normal';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    if (countdownLoadStatusEl) countdownLoadStatusEl.textContent = 'Apagado Temporal';
+                }
+            }
+
+            // Sincronizar con datos del servidor
+            syncWithServerData(serverData) {
+                if (serverData.temporaryLoadOff && serverData.loadOffRemainingSeconds > 0) {
+                    // Hay apagado temporal activo
+                    this.remainingSeconds = serverData.loadOffRemainingSeconds;
+                    this.totalDurationSeconds = serverData.loadOffDuration || this.totalDurationSeconds;
+                    
+                    // Calcular tiempos si no están establecidos
+                    if (!this.startTime) {
+                        this.startTime = Date.now() - ((this.totalDurationSeconds - this.remainingSeconds) * 1000);
+                    }
+                    if (!this.scheduledEndTime) {
+                        this.scheduledEndTime = Date.now() + (this.remainingSeconds * 1000);
+                    }
+                    
+                    // Iniciar countdown si no está activo
+                    if (!this.countdownInterval) {
+                        this.startCountdownTimer();
+                    }
+                } else {
+                    // No hay apagado temporal activo
+                    this.stopCountdown();
+                }
+                
+                this.updateCountdownDisplay();
+            }
+
+            // Iniciar el timer interno
+            startCountdownTimer() {
+                if (this.countdownInterval) {
+                    clearInterval(this.countdownInterval);
+                }
+                
+                this.countdownInterval = setInterval(() => {
+                    this.remainingSeconds--;
+                    this.updateCountdownDisplay();
+                    
+                    if (this.remainingSeconds <= 0) {
+                        this.stopCountdown();
+                        
+                        // Notificación de reactivación
+                        if ('Notification' in window && Notification.permission === 'granted') {
+                            new Notification('🔋 Carga Reactivada', {
+                                body: 'El apagado temporal ha finalizado. La carga se ha reactivado automáticamente.',
+                                icon: '/favicon.ico'
+                            });
+                        }
+                        
+                        console.log('🔋 Carga reactivada automáticamente');
+                    }
+                }, 1000);
+            }
+
+            // Detener countdown
+            stopCountdown() {
+                if (this.countdownInterval) {
+                    clearInterval(this.countdownInterval);
+                    this.countdownInterval = null;
+                }
+                
+                this.remainingSeconds = 0;
+                this.totalDurationSeconds = 0;
+                this.startTime = null;
+                this.scheduledEndTime = null;
+                this.updateCountdownDisplay();
+            }
+
+            // Guardar estado en localStorage
+            saveState() {
+                if (this.remainingSeconds > 0) {
+                    localStorage.setItem('countdownState', JSON.stringify({
+                        remainingSeconds: this.remainingSeconds,
+                        totalDurationSeconds: this.totalDurationSeconds,
+                        startTime: this.startTime,
+                        scheduledEndTime: this.scheduledEndTime,
+                        lastUpdate: Date.now()
+                    }));
+                } else {
+                    localStorage.removeItem('countdownState');
+                }
+            }
+
+            // Restaurar estado desde localStorage
+            restoreState() {
+                const savedState = localStorage.getItem('countdownState');
+                if (savedState) {
+                    try {
+                        const state = JSON.parse(savedState);
+                        const now = Date.now();
+                        const elapsedSeconds = Math.floor((now - state.lastUpdate) / 1000);
+                        
+                        this.remainingSeconds = Math.max(0, state.remainingSeconds - elapsedSeconds);
+                        this.totalDurationSeconds = state.totalDurationSeconds;
+                        this.startTime = state.startTime;
+                        this.scheduledEndTime = state.scheduledEndTime;
+                        
+                        if (this.remainingSeconds > 0) {
+                            this.startCountdownTimer();
+                        } else {
+                            localStorage.removeItem('countdownState');
+                        }
+                        
+                        this.updateCountdownDisplay();
+                    } catch (e) {
+                        console.error('Error restaurando estado del countdown:', e);
+                        localStorage.removeItem('countdownState');
+                    }
+                }
+            }
+        }
+
+        // Crear instancia global del countdown manager
+        const countdownManager = new CountdownManager();
+
+        // ===== FIN DE LA CLASE COUNTDOWNMANAGER =====
+        // Mostrar notificación de alerta    
+        
         function showToast(message, type = 'success') {
             const alertsContainer = document.getElementById('alerts-container');
             const alertHtml = `
@@ -734,6 +1007,7 @@
             const lastUpdateTime = currentData.last_update ? new Date(currentData.last_update).toLocaleTimeString() : 'N/A';
             document.getElementById('last-update-time').textContent = lastUpdateTime;
             document.getElementById('server-uptime-display').textContent = formatUptime(currentData.server_uptime || 0);
+            countdownManager.syncWithServerData(currentData);
         }
 
         function getChargeStateColor(state) {
@@ -780,6 +1054,7 @@
                 currentLoadStatus.textContent = currentData.loadControlState ? 'Carga Activa' : 'Carga Inactiva';
                 currentLoadStatus.className = `badge bg-${currentData.loadControlState ? 'success' : 'danger'}`;
             }
+            countdownManager.syncWithServerData(currentData);
         }
 
         function updateSystemInfoUI(sysInfo) {
@@ -854,6 +1129,14 @@
                 const result = await response.json();
                 if (result.success) {
                     showToast(`Carga apagada por ${formatSecondsToHMS(result.duration || 0)}`, 'success');
+                    // ===== AGREGAR ESTAS LÍNEAS NUEVAS =====
+                    const totalSeconds = result.duration || (hours * 3600 + minutes * 60 + seconds);
+                    countdownManager.totalDurationSeconds = totalSeconds;
+                    countdownManager.remainingSeconds = totalSeconds;
+                    countdownManager.startTime = Date.now();
+                    countdownManager.scheduledEndTime = Date.now() + (totalSeconds * 1000);
+                    countdownManager.startCountdownTimer();
+                    // ===== FIN DE LÍNEAS NUEVAS =====
                     await fetchData();
                 } else {
                     showToast(`Error al apagar carga: ${result.error || 'Error desconocido'}`, 'danger');
@@ -872,6 +1155,7 @@
                 const result = await response.json();
                 if (result.success) {
                     showToast(`Apagado temporal cancelado: ${result.message || ''}`, 'success');
+                    countdownManager.stopCountdown();
                     await fetchData();
                 } else {
                     showToast(`Error al cancelar apagado: ${result.error || 'Error desconocido'}`, 'danger');
@@ -1241,6 +1525,35 @@
             }
 
             console.log('Application initialized successfully');
+
+            // Inicializar countdown manager
+            countdownManager.restoreState();
+            
+            // Event listener para el botón de cancelar visual
+            const visualCancelBtn = document.getElementById('visual-cancel-countdown-btn');
+            if (visualCancelBtn) {
+                visualCancelBtn.addEventListener('click', cancelTempOff);
+            }
+            
+            // Guardar estado periódicamente
+            setInterval(() => {
+                countdownManager.saveState();
+            }, 5000); // Cada 5 segundos
+            
+            // Solicitar permisos de notificación
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+            
+            // Restaurar estado al recargar la página
+            window.addEventListener('beforeunload', () => {
+                countdownManager.saveState();
+            });
+            
+            console.log('✅ Cronómetro inicializado correctamente');
+
+
+
         });
 
         // Global error handler
