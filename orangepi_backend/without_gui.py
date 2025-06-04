@@ -201,10 +201,16 @@ def format_value(key: str, value: Any) -> str:
         if isinstance(value, (int, float)):
             return f"{value:.2f} V"
     
-    # Corrientes en mA
-    if 'current' in key.lower() and 'mA' not in str(value):
+    # Corrientes en mA, ignorando la variable PWM
+    if 'current' in key.lower() and 'pwm' not in key.lower() and 'mA' not in str(value):
         if isinstance(value, (int, float)):
             return f"{value:.0f} mA"
+
+    # Valor de PWM (0-255) mostrado como porcentaje
+    if 'pwm' in key.lower():
+        if isinstance(value, (int, float)):
+            percent = (float(value) / 255.0) * 100.0
+            return f"{value:.0f} ({percent:.0f}%)"
     
     # Temperaturas
     if 'temperature' in key.lower():
@@ -261,6 +267,7 @@ def display_dashboard(data: Dict[str, Any]):
         ("⬆️ Corriente Carga", data.get('batteryToLoadCurrent')),
         ("↔️ Corriente Neta", data.get('netCurrent')),
         ("🌡️ Temperatura", data.get('temperature')),
+        ("PWM Actual", data.get('currentPWM')),
     ]
     
     for label, value in main_metrics:
@@ -303,7 +310,24 @@ def display_dashboard(data: Dict[str, Any]):
     
     for label, value in voltage_config:
         print(f"{label:<12}: {format_value('voltage', value)}")
-    
+
+    print()
+
+    # Parámetros de batería
+    print("🔋 PARÁMETROS DE BATERÍA")
+    print("-" * 40)
+    battery_params = [
+        ("Capacidad", format_value('ah', data.get('batteryCapacity'))),
+        ("Umbral Corriente", format_value('percentage', data.get('thresholdPercentage'))),
+        ("Corriente Máx", format_value('current', data.get('maxAllowedCurrent'))),
+        ("Factor Div", data.get('factorDivider')),
+        ("Horas Bulk Máx", format_value('hours', data.get('maxBulkHours'))),
+        ("Horas Abs Máx", format_value('hours', data.get('maxAbsorptionHours'))),
+    ]
+
+    for label, value in battery_params:
+        print(f"{label:<16}: {value}")
+
     print()
     
     # Estado del sistema
