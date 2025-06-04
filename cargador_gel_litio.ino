@@ -92,6 +92,10 @@ int currentPWM = 0;
 float panelToBatteryCurrent = 0;
 float batteryToLoadCurrent = 0;
 
+// ========== VARIABLES PARA TIMING NO BLOQUEANTE ==========
+unsigned long previousMainLoopTime = 0;
+const unsigned long MAIN_LOOP_INTERVAL = 1000; // 1 segundo en milisegundos
+
 // Parámetros de control de voltaje ya están en config.h
 // const float LVD = 12.0;
 // const float LVR = 12.5;
@@ -555,6 +559,10 @@ float getPanelVoltage() {
   return ina219_1.getBusVoltage_V();
 }
 
+void setLEDSolarRobust(int state) {
+    pinMode(LED_SOLAR, OUTPUT);  // Forzar modo GPIO
+    digitalWrite(LED_SOLAR, state);
+}
 
 void setup() {
   Serial.begin(9600);
@@ -683,148 +691,51 @@ if (ina219_1.begin()) {
   // Iniciar el servidor web
   initWebServer();
   initSerialCommunication();
+
+  pinMode(LED_SOLAR, OUTPUT);
+  digitalWrite(LED_SOLAR, LOW);
+
 }
 
 void loop() {
   esp_task_wdt_reset();
 
-  unsigned long now = millis();
+  // Encender LED si hay corriente desde el panel Y sensor disponible
+  if (ina219_1_available && panelToBatteryCurrent > 10) {
+    //digitalWrite(LED_SOLAR, HIGH);
+    setLEDSolarRobust(HIGH);  // Usar función robusta para evitar problemas de GPIO
+  } else {
+    //digitalWrite(LED_SOLAR, LOW);
+    setLEDSolarRobust(LOW);  // Usar función robusta para evitar problemas de GPIO
+  }
 
+  unsigned long currentTime = millis();
+
+  // ===== TAREAS QUE SE EJECUTAN CONTINUAMENTE (SIN DELAY) =====
+  
+  // Manejar comandos seriales (debe ejecutarse frecuentemente)
+  handleSerialCommands();
+  
+  // Manejar servidor web (debe ejecutarse frecuentemente)
+  handleWebServer();
+  
+  // Verificar sensor de paneles periódicamente
+  checkPanelSensorAvailability();
+  
+  // Actualizar tracking de Ah y guardar estado
   updateAhTracking();
   saveChargingState();
-
-  checkPanelSensorAvailability(); // Verificar sensor de paneles
-
-  handleSerialCommands();
+  
+  // Enviar actualizaciones seriales periódicas
   periodicSerialUpdate();
 
-  // Leer datos de sensores con manejo de errores
-  panelToBatteryCurrent = getPanelCurrent(); // Nueva función
-  batteryToLoadCurrent = getAverageCurrent(ina219_2); // Sin cambios
-  float voltagePanel = getPanelVoltage(); // Nueva función
-  float voltageBatterySensor2 = ina219_2.getBusVoltage_V(); // Sin cambios
-
-    // Encender LED si hay corriente desde el panel Y sensor disponible
-  if (ina219_1_available && panelToBatteryCurrent > 0) {
-    digitalWrite(LED_SOLAR, HIGH);
-  } else {
-    digitalWrite(LED_SOLAR, LOW);
-  }
-
-  // Mostrar en serial
-  Serial.println("--------------------------------------------");
-  Serial.print("Panel->Batería: Corriente = ");
-  Serial.print(panelToBatteryCurrent);
-  Serial.print(" mA, VoltajePanel = ");
-  Serial.print(voltagePanel);
-  Serial.print(" V");
-  if (!ina219_1_available) {
-    Serial.println(" [SIN SENSOR - Usando 0mA]");
-  } else {
-    Serial.println(" [Sensor OK]");
-  }
-
-  Serial.print("Batería->Carga : Corriente = ");
-  Serial.print(batteryToLoadCurrent);
-  Serial.print(" mA, VoltajeBat = ");
-  Serial.print(voltageBatterySensor2);
-  Serial.println(" V");
-
-  Serial.print("Estado de carga: ");
-  Serial.println(getChargeStateString(currentState));
-
-  Serial.print("Voltaje etapa BULK: ");
-  Serial.println(bulkVoltage);
-
-  if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
-    currentPWM = 0;
-    Serial.println("Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
-  }
-
-  // Control de voltaje (LVD y LVR)
-  if (!temporaryLoadOff) {
-    if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
-      digitalWrite(LOAD_CONTROL_PIN, LOW);
-      Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)");
-    } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
-      digitalWrite(LOAD_CONTROL_PIN, HIGH);
-      Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
-    }
-  } else {
-    // Si hay un apagado temporal activo, verificar si debe terminar
-    if (millis() - loadOffStartTime >= loadOffDuration) {
-      temporaryLoadOff = false;
-      digitalWrite(LOAD_CONTROL_PIN, HIGH);
-      notaPersonalizada = "Apagado temporal completado, carga reactivada";
-      Serial.println("⏰ Apagado temporal completado, carga reactivada");
-    }
-  }
-
-  // RE-ENTRY CHECK
-  const float reEnterBulkVoltage = 12.6;
-  const unsigned long reEnterTime = 30000UL;
-  static unsigned long lowVoltageStart = 0;
-  static bool belowThreshold = false;
-
-  if (voltageBatterySensor2 < reEnterBulkVoltage) {
-    if (!belowThreshold) {
-      belowThreshold = true;
-      lowVoltageStart = millis();
-    } else {
-      if (millis() - lowVoltageStart >= reEnterTime) {
-        if (currentState != BULK_CHARGE) {
-          currentState = BULK_CHARGE;
-          Serial.println("-> Forzando retorno a BULK_CHARGE (batería < 12.6 V por 30s)");
-        }
-      }
-    }
-  } else {
-    belowThreshold = false;
-    lowVoltageStart = 0;
-  }
-
-  updateChargeState(voltageBatterySensor2, panelToBatteryCurrent);
-
-
-  // Recalcular horas máximas si se usa fuente DC
-  if (useFuenteDC && fuenteDC_Amps > 0) {
-    maxBulkHours = batteryCapacity / fuenteDC_Amps;
+  // ===== TAREAS QUE SE EJECUTAN CADA 1 SEGUNDO =====
+  if (currentTime - previousMainLoopTime >= MAIN_LOOP_INTERVAL) {
+    previousMainLoopTime = currentTime;
     
-    // Solo actualizar la nota si no estamos en estado de ERROR
-    if (currentState != ERROR) {
-      if (currentState == BULK_CHARGE) {
-        // La nota ya se actualiza en el control de Bulk
-      } else {
-        notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
-      }
-    }
-  } else {
-    maxBulkHours = 0.0;
-    
-    // Solo actualizar la nota si no estamos en estado de ERROR
-    if (currentState != ERROR) {
-      notaPersonalizada = "Usando paneles solares";
-    }
+    // Ejecutar las tareas principales cada 1 segundo
+    executeMainLoopTasks();
   }
-
-
-  temperature = readTemperature();
-  Serial.print("Temperatura: ");
-  Serial.print(temperature);
-  Serial.println(" °C");
-  if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
-    Serial.println("¡Temperatura crítica! Apagando el circuito...");
-    currentState = ERROR;
-  }
-  Serial.println("Panel->Batería: " + String(panelToBatteryCurrent) + " mA");
-  Serial.println("Batería->Carga: " + String(batteryToLoadCurrent) + " mA");
-  Serial.println("Voltaje Panel: " + String(ina219_1.getBusVoltage_V()) + " V");
-  Serial.println("Voltaje Batería: " + String(ina219_2.getBusVoltage_V()) + " V");
-  Serial.println("Estado: " + getChargeStateString(currentState));
-  Serial.println("pwmValue: " + String(currentPWM));
-  handleWebServer();
-
-  delay(1000);
 }
 
 void saveChargingState() {
@@ -1126,4 +1037,126 @@ float readTemperature() {
   temperature -= 273.15;                               // Convertir a °C
 
   return temperature;
+}
+
+
+
+// ========== FUNCIÓN PARA LAS TAREAS PRINCIPALES ==========
+void executeMainLoopTasks() {
+  // Leer datos de sensores con manejo de errores
+  panelToBatteryCurrent = getPanelCurrent(); 
+  batteryToLoadCurrent = getAverageCurrent(ina219_2); 
+  float voltagePanel = getPanelVoltage(); 
+  float voltageBatterySensor2 = ina219_2.getBusVoltage_V(); 
+
+  
+
+  // Mostrar en serial
+  Serial.println("--------------------------------------------");
+  Serial.print("Panel->Batería: Corriente = ");
+  Serial.print(panelToBatteryCurrent);
+  Serial.print(" mA, VoltajePanel = ");
+  Serial.print(voltagePanel);
+  Serial.print(" V");
+  if (!ina219_1_available) {
+    Serial.println(" [SIN SENSOR - Usando 0mA]");
+  } else {
+    Serial.println(" [Sensor OK]");
+  }
+
+  Serial.print("Batería->Carga : Corriente = ");
+  Serial.print(batteryToLoadCurrent);
+  Serial.print(" mA, VoltajeBat = ");
+  Serial.print(voltageBatterySensor2);
+  Serial.println(" V");
+
+  Serial.print("Estado de carga: ");
+  Serial.println(getChargeStateString(currentState));
+
+  Serial.print("Voltaje etapa BULK: ");
+  Serial.println(bulkVoltage);
+
+  if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
+    currentPWM = 0;
+    Serial.println("Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
+  }
+
+  // Control de voltaje (LVD y LVR)
+  if (!temporaryLoadOff) {
+    if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, LOW);
+      Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)");
+    } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
+    }
+  } else {
+    // Si hay un apagado temporal activo, verificar si debe terminar
+    if (millis() - loadOffStartTime >= loadOffDuration) {
+      temporaryLoadOff = false;
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      notaPersonalizada = "Apagado temporal completado, carga reactivada";
+      Serial.println("⏰ Apagado temporal completado, carga reactivada");
+    }
+  }
+
+  // RE-ENTRY CHECK
+  const float reEnterBulkVoltage = 12.6;
+  const unsigned long reEnterTime = 30000UL;
+  static unsigned long lowVoltageStart = 0;
+  static bool belowThreshold = false;
+
+  if (voltageBatterySensor2 < reEnterBulkVoltage) {
+    if (!belowThreshold) {
+      belowThreshold = true;
+      lowVoltageStart = millis();
+    } else {
+      if (millis() - lowVoltageStart >= reEnterTime) {
+        if (currentState != BULK_CHARGE) {
+          currentState = BULK_CHARGE;
+          Serial.println("-> Forzando retorno a BULK_CHARGE (batería < 12.6 V por 30s)");
+        }
+      }
+    }
+  } else {
+    belowThreshold = false;
+    lowVoltageStart = 0;
+  }
+
+  updateChargeState(voltageBatterySensor2, panelToBatteryCurrent);
+
+  // Recalcular horas máximas si se usa fuente DC
+  if (useFuenteDC && fuenteDC_Amps > 0) {
+    maxBulkHours = batteryCapacity / fuenteDC_Amps;
+    
+    if (currentState != ERROR) {
+      if (currentState == BULK_CHARGE) {
+        // La nota ya se actualiza en el control de Bulk
+      } else {
+        notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
+      }
+    }
+  } else {
+    maxBulkHours = 0.0;
+    
+    if (currentState != ERROR) {
+      notaPersonalizada = "Usando paneles solares";
+    }
+  }
+
+  temperature = readTemperature();
+  Serial.print("Temperatura: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+  if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
+    Serial.println("¡Temperatura crítica! Apagando el circuito...");
+    currentState = ERROR;
+  }
+  
+  Serial.println("Panel->Batería: " + String(panelToBatteryCurrent) + " mA");
+  Serial.println("Batería->Carga: " + String(batteryToLoadCurrent) + " mA");
+  Serial.println("Voltaje Panel: " + String(ina219_1.getBusVoltage_V()) + " V");
+  Serial.println("Voltaje Batería: " + String(ina219_2.getBusVoltage_V()) + " V");
+  Serial.println("Estado: " + getChargeStateString(currentState));
+  Serial.println("pwmValue: " + String(currentPWM));
 }
