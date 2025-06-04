@@ -320,6 +320,7 @@ def display_dashboard(data: Dict[str, Any]):
         ("Capacidad", format_value('ah', data.get('batteryCapacity'))),
         ("Umbral Corriente", format_value('percentage', data.get('thresholdPercentage'))),
         ("Corriente Máx", format_value('current', data.get('maxAllowedCurrent'))),
+        ("Límite Flotación", format_value('current', data.get('currentLimitIntoFloatStage'))),
         ("Factor Div", data.get('factorDivider')),
         ("Horas Bulk Máx", format_value('hours', data.get('maxBulkHours'))),
         ("Horas Abs Máx", format_value('hours', data.get('maxAbsorptionHours'))),
