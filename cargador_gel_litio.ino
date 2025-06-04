@@ -705,7 +705,7 @@ void loop() {
   float voltageBatterySensor2 = ina219_2.getBusVoltage_V(); // Sin cambios
 
     // Encender LED si hay corriente desde el panel Y sensor disponible
-  if (ina219_1_available && panelToBatteryCurrent > 50) {
+  if (ina219_1_available && panelToBatteryCurrent > 0) {
     digitalWrite(LED_SOLAR, HIGH);
   } else {
     digitalWrite(LED_SOLAR, LOW);
@@ -1014,7 +1014,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       notaPersonalizada = "estoy en la sección Error"; 
       while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
           batteryVoltage >= maxBatteryVoltageAllowed ) {
-          pinMode(LED_SOLAR, OUTPUT);
+          //pinMode(LED_SOLAR, OUTPUT);
           delay(100);
           digitalWrite(LED_SOLAR, LOW);
           delay(100);
