@@ -182,6 +182,32 @@ class ESP32Monitor:
             logger.error(f"❌ Error configurando {parameter}: {response}")
             return False
 
+    def toggle_load(self, seconds: int) -> bool:
+        """Apagar la carga temporalmente por la cantidad de segundos indicada"""
+        if seconds < 1 or seconds > 43200:
+            logger.error("❌ Tiempo fuera de rango (1-43200 segundos)")
+            return False
+
+        response = self.send_command(f"CMD:TOGGLE_LOAD:{seconds}")
+
+        if response and response.startswith("OK:"):
+            logger.info(f"✅ Apagado temporal por {seconds} segundos")
+            return True
+        else:
+            logger.error(f"❌ Error en apagado temporal: {response}")
+            return False
+
+    def cancel_temporary_off(self) -> bool:
+        """Cancelar el apagado temporal de la carga"""
+        response = self.send_command("CMD:CANCEL_TEMP_OFF")
+
+        if response and response.startswith("OK:"):
+            logger.info("✅ Apagado temporal cancelado")
+            return True
+        else:
+            logger.error(f"❌ Error cancelando apagado temporal: {response}")
+            return False
+
 def clear_screen():
     """Limpiar pantalla"""
     import os
@@ -366,7 +392,7 @@ def display_dashboard(data: Dict[str, Any]):
         print()
     
     print("=" * 80)
-    print("Comandos: [c]onfigurar | [q] salir | [r] actualizar")
+    print("Comandos: [c]onfigurar | [t] temporizar carga | [x] cancelar apagado | [q] salir | [r] actualizar")
     print("=" * 80)
 
 def configuration_menu(monitor: ESP32Monitor):
@@ -522,6 +548,51 @@ def configuration_menu(monitor: ESP32Monitor):
         print("\nOperación cancelada")
         input("Presiona Enter para continuar...")
 
+def temporary_off_menu(monitor: ESP32Monitor):
+    """Menú para configurar apagado temporal de la carga"""
+    clear_screen()
+    print("⏱️ APAGADO TEMPORAL DE LA CARGA")
+    print("=" * 50)
+    try:
+        hours = int(input("Horas (0-12): ") or "0")
+        minutes = int(input("Minutos (0-59): ") or "0")
+        seconds = int(input("Segundos (0-59): ") or "0")
+
+        total_seconds = hours * 3600 + minutes * 60 + seconds
+
+        if total_seconds < 1 or total_seconds > 43200:
+            print("❌ Tiempo fuera de rango (1 segundo - 12 horas)")
+            input("Presiona Enter para continuar...")
+            return
+
+        if monitor.toggle_load(total_seconds):
+            print(f"✅ Carga apagada por {total_seconds} segundos")
+        else:
+            print("❌ Error enviando comando al ESP32")
+
+        input("Presiona Enter para continuar...")
+
+    except (ValueError, KeyboardInterrupt):
+        print("\nOperación cancelada")
+        input("Presiona Enter para continuar...")
+
+def cancel_temp_menu(monitor: ESP32Monitor):
+    """Cancelar el apagado temporal si está activo"""
+    clear_screen()
+    print("🚫 CANCELAR APAGADO TEMPORAL")
+    print("=" * 50)
+    confirm = input("¿Confirmar cancelación? (s/N): ").strip().lower()
+    if confirm not in ['s', 'y', 'si', 'yes']:
+        print("Operación cancelada")
+        input("Presiona Enter para continuar...")
+        return
+
+    if monitor.cancel_temporary_off():
+        print("✅ Apagado temporal cancelado")
+    else:
+        print("❌ Error al cancelar apagado temporal")
+    input("Presiona Enter para continuar...")
+
 def main():
     """Función principal"""
     parser = argparse.ArgumentParser(description='Monitor de terminal para ESP32 Cargador Solar')
@@ -583,10 +654,14 @@ def main():
                     break
                 elif user_input in ['c', 'config', 'configurar']:
                     configuration_menu(monitor)
+                elif user_input in ['t', 'temporizar', 'temporizador']:
+                    temporary_off_menu(monitor)
+                elif user_input in ['x', 'cancelar']:
+                    cancel_temp_menu(monitor)
                 elif user_input in ['r', 'refresh', 'actualizar']:
                     continue  # Forzar actualización inmediata
                 # Cualquier otra tecla también actualiza
-            
+
     except KeyboardInterrupt:
         print("\n\n⏹️ Interrumpido por usuario")
     except Exception as e:
