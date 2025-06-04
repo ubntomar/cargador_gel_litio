@@ -166,7 +166,13 @@ class ESP32Monitor:
     
     def set_parameter(self, parameter: str, value: Any) -> bool:
         """Establecer un parámetro en el ESP32"""
-        command = f"CMD:SET_{parameter}:{value}"
+        # Convertir booleanos a 'true'/'false' para compatibilidad con el firmware
+        if isinstance(value, bool):
+            value_str = str(value).lower()
+        else:
+            value_str = str(value)
+
+        command = f"CMD:SET_{parameter}:{value_str}"
         response = self.send_command(command)
         
         if response and response.startswith("OK:"):
