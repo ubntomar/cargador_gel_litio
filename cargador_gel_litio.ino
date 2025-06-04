@@ -48,6 +48,11 @@ const float maxBatteryVoltageAllowed = 15.0;
 // Variable compartida para la nota personalizada
 String notaPersonalizada = "";
 
+// Estado del sensor de paneles
+bool ina219_1_available = false;
+unsigned long lastPanelSensorCheck = 0;
+const unsigned long PANEL_SENSOR_CHECK_INTERVAL = 10000; // 10 segundos
+
 
 // Parámetros de carga para baterías de gel
 float bulkVoltage = 14.4;
@@ -238,7 +243,10 @@ void sendDataToOrangePi() {
   // === CONFIGURACIÓN DE FUENTE ===
   json += "\"useFuenteDC\":" + String(useFuenteDC ? "true" : "false") + ",";
   json += "\"fuenteDC_Amps\":" + String(fuenteDC_Amps) + ",";
-  json += "\"maxBulkHours\":" + String(maxBulkHours) + ",";
+  json += "\"maxBulkHours\": " + String(maxBulkHours) + ",";
+  json += "\"panelSensorAvailable\": ";
+  json += ina219_1_available ? "true" : "false";
+  json += ","; 
   
   // === CONFIGURACIÓN AVANZADA ===
   json += "\"maxAbsorptionHours\":" + String(maxAbsorptionHours) + ",";
@@ -265,7 +273,7 @@ void sendDataToOrangePi() {
   // === ESTADO DEL SISTEMA ===
   json += "\"loadControlState\":" + String(digitalRead(LOAD_CONTROL_PIN) ? "true" : "false") + ",";
   json += "\"ledSolarState\":" + String(digitalRead(LED_SOLAR) ? "true" : "false") + ",";
-  
+  json += "\"panelSensorAvailable\":" + String(ina219_1_available ? "true" : "false") + ",";
   // Sanitizar nota personalizada para JSON
   String sanitizedNota = notaPersonalizada;
   sanitizedNota.replace("\"", "\\\"");
@@ -493,7 +501,59 @@ void periodicSerialUpdate() {
 }
 
 
+// Función para verificar disponibilidad del sensor de paneles
+void checkPanelSensorAvailability() {
+  if (millis() - lastPanelSensorCheck > PANEL_SENSOR_CHECK_INTERVAL) {
+    lastPanelSensorCheck = millis();
+    
+    if (!ina219_1_available) {
+      // Intentar reconectar sensor de paneles
+      if (ina219_1.begin()) {
+        ina219_1.setCalibration_32V_2A();
+        ina219_1_available = true;
+        Serial.println("🔄 Sensor de paneles reconectado automáticamente");
+        notaPersonalizada = "Sensor de paneles reconectado";
+      }
+    }
+  }
+}
 
+// Función para leer corriente de paneles con manejo de errores
+float getPanelCurrent() {
+  if (!ina219_1_available) {
+    return 0.0; // Sin sensor = sin corriente de paneles
+  }
+  
+  float totalCurrent = 0;
+  int validSamples = 0;
+  
+  for (int i = 0; i < numSamples; i++) {
+    float current_mA = ina219_1.getCurrent_mA() * 10; // shunt 10 mΩ
+    if (current_mA >= 0 && current_mA <= maxAllowedCurrent) {
+      totalCurrent += current_mA;
+      validSamples++;
+    } else {
+      // Error de comunicación - marcar como no disponible
+      ina219_1_available = false;
+      Serial.println("❌ Sensor de paneles perdió comunicación");
+      notaPersonalizada = "Sensor de paneles desconectado";
+      return 0.0;
+    }
+    delay(5);
+  }
+  
+  if (validSamples == 0) return 0.0;
+  return totalCurrent / validSamples;
+}
+
+// Función para leer voltaje de paneles con manejo de errores
+float getPanelVoltage() {
+  if (!ina219_1_available) {
+    return 0.0; // Sin sensor = sin voltaje
+  }
+  
+  return ina219_1.getBusVoltage_V();
+}
 
 
 void setup() {
@@ -527,17 +587,24 @@ void setup() {
   // Inicializar I2C
   Wire.begin(SDA_PIN, SCL_PIN);
 
-  // Inicializar sensores INA219
-  if (!ina219_1.begin()) {
-    Serial.println("No se pudo encontrar INA219 en 0x40.");
-    while (1);
-  }
+ // Inicializar sensor de paneles (0x40) SIN bloquear
+if (ina219_1.begin()) {
+  ina219_1.setCalibration_32V_2A();
+  ina219_1_available = true;
+  Serial.println("✅ Sensor INA219 paneles (0x40) inicializado");
+} else {
+  ina219_1_available = false;
+  Serial.println("⚠️ Sensor INA219 paneles (0x40) no encontrado");
+  Serial.println("   Sistema continuará sin lectura de paneles");
+  notaPersonalizada = "Sin sensor de paneles - corriente = 0";
+}
+
+
   if (!ina219_2.begin()) {
     Serial.println("No se pudo encontrar INA219 en 0x41.");
     while (1);
   }
 
-  ina219_1.setCalibration_32V_2A();
   ina219_2.setCalibration_32V_2A();
 
   Serial.println("Sensores INA219 listos.");
@@ -626,17 +693,19 @@ void loop() {
   updateAhTracking();
   saveChargingState();
 
+  checkPanelSensorAvailability(); // Verificar sensor de paneles
+
   handleSerialCommands();
   periodicSerialUpdate();
 
-  // Leer datos de sensores
-  panelToBatteryCurrent = getAverageCurrent(ina219_1);
-  batteryToLoadCurrent = getAverageCurrent(ina219_2);
-  float voltagePanel = ina219_1.getBusVoltage_V();
-  float voltageBatterySensor2 = ina219_2.getBusVoltage_V();
+  // Leer datos de sensores con manejo de errores
+  panelToBatteryCurrent = getPanelCurrent(); // Nueva función
+  batteryToLoadCurrent = getAverageCurrent(ina219_2); // Sin cambios
+  float voltagePanel = getPanelVoltage(); // Nueva función
+  float voltageBatterySensor2 = ina219_2.getBusVoltage_V(); // Sin cambios
 
-  // Encender LED si hay corriente desde el panel
-  if (panelToBatteryCurrent > 50) {
+    // Encender LED si hay corriente desde el panel Y sensor disponible
+  if (ina219_1_available && panelToBatteryCurrent > 50) {
     digitalWrite(LED_SOLAR, HIGH);
   } else {
     digitalWrite(LED_SOLAR, LOW);
@@ -648,7 +717,12 @@ void loop() {
   Serial.print(panelToBatteryCurrent);
   Serial.print(" mA, VoltajePanel = ");
   Serial.print(voltagePanel);
-  Serial.println(" V");
+  Serial.print(" V");
+  if (!ina219_1_available) {
+    Serial.println(" [SIN SENSOR - Usando 0mA]");
+  } else {
+    Serial.println(" [Sensor OK]");
+  }
 
   Serial.print("Batería->Carga : Corriente = ");
   Serial.print(batteryToLoadCurrent);

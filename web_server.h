@@ -41,6 +41,7 @@ extern float temperature;
 extern Adafruit_INA219 ina219_1;
 extern Adafruit_INA219 ina219_2;
 extern ChargeState currentState;
+extern bool ina219_1_available;
 
 extern unsigned long bulkStartTime;
 
