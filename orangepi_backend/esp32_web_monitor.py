@@ -434,6 +434,22 @@ class WebHandler(BaseHTTPRequestHandler):
                     <div class="metric-label">Estado de Carga</div>
                     <div class="metric-value"><span id="charge-state" class="state-bulk">UNKNOWN</span></div>
                 </div>
+                <div class="metric">
+                    <div class="metric-label">SOC Estimado</div>
+                    <div class="metric-value"><span id="estimated-soc">0.0</span><span class="metric-unit">%</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Ah Acumulados</div>
+                    <div class="metric-value"><span id="accumulated-ah">0.00</span><span class="metric-unit">Ah</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Horas Absorción Calc.</div>
+                    <div class="metric-value"><span id="calc-abs-hours">0.0</span><span class="metric-unit">h</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Nota</div>
+                    <div class="metric-value"><span id="note-text">-</span></div>
+                </div>
             </div>
         </div>
 
@@ -448,6 +464,10 @@ class WebHandler(BaseHTTPRequestHandler):
                 <div class="form-group">
                     <label>Umbral Corriente (%):</label>
                     <input type="number" id="thresholdPercentage" step="0.1" min="0.1" max="5">
+                </div>
+                <div class="form-group">
+                    <label>Corriente Máxima (mA):</label>
+                    <input type="number" id="maxAllowedCurrent" step="100" min="1000" max="15000">
                 </div>
                 <div class="form-group">
                     <label>Voltaje BULK (V):</label>
@@ -466,6 +486,13 @@ class WebHandler(BaseHTTPRequestHandler):
                     <select id="isLithium">
                         <option value="false">GEL</option>
                         <option value="true">Litio</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fuente de Energía:</label>
+                    <select id="useFuenteDC">
+                        <option value="false">Solar</option>
+                        <option value="true">DC</option>
                     </select>
                 </div>
             </div>
@@ -556,6 +583,10 @@ class WebHandler(BaseHTTPRequestHandler):
             document.getElementById('net-current').textContent = ((currentData.netCurrent || 0) / 1000).toFixed(2);
             document.getElementById('temperature').textContent = (currentData.temperature || 0).toFixed(1);
 
+            document.getElementById('estimated-soc').textContent = (currentData.estimatedSOC || 0).toFixed(1);
+            document.getElementById('accumulated-ah').textContent = (currentData.accumulatedAh || 0).toFixed(2);
+            document.getElementById('calc-abs-hours').textContent = (currentData.calculatedAbsorptionHours || 0).toFixed(2);
+
             const pwm = currentData.currentPWM || 0;
             const pwmPercent = Math.round((pwm / 255) * 100);
             document.getElementById('current-pwm-detailed').textContent = `${pwm} (${pwmPercent}%)`;
@@ -564,6 +595,8 @@ class WebHandler(BaseHTTPRequestHandler):
             const state = currentData.chargeState || 'UNKNOWN';
             stateElement.textContent = state;
             stateElement.className = `state-${state.toLowerCase().replace('_', '-')}`;
+
+            document.getElementById('note-text').textContent = currentData.notaPersonalizada || '-';
 
             updateCountdown();
         }
@@ -604,10 +637,12 @@ class WebHandler(BaseHTTPRequestHandler):
             const params = [
                 ['batteryCapacity', parseFloat(document.getElementById('batteryCapacity').value)],
                 ['thresholdPercentage', parseFloat(document.getElementById('thresholdPercentage').value)],
+                ['maxAllowedCurrent', parseInt(document.getElementById('maxAllowedCurrent').value)],
                 ['bulkVoltage', parseFloat(document.getElementById('bulkVoltage').value)],
                 ['absorptionVoltage', parseFloat(document.getElementById('absorptionVoltage').value)],
                 ['floatVoltage', parseFloat(document.getElementById('floatVoltage').value)],
-                ['isLithium', document.getElementById('isLithium').value === 'true']
+                ['isLithium', document.getElementById('isLithium').value === 'true'],
+                ['useFuenteDC', document.getElementById('useFuenteDC').value === 'true']
             ];
 
             let success = true;
