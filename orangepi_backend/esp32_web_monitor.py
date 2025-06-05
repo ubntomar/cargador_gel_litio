@@ -381,6 +381,70 @@ class WebHandler(BaseHTTPRequestHandler):
             .tabs { flex-direction: column; }
             .countdown-timer { font-size: 28px; }
         }
+
+        async function saveBatteryConfig() {
+            const params = [
+                ['batteryCapacity', parseFloat(document.getElementById('batteryCapacity').value)],
+                ['thresholdPercentage', parseFloat(document.getElementById('thresholdPercentage').value)],
+                ['maxAllowedCurrent', parseFloat(document.getElementById('maxAllowedCurrent').value)],
+                ['isLithium', document.getElementById('isLithium').value === 'true']
+            ];
+
+            await saveMultipleParameters(params, '🔋 Configuración de batería guardada');
+        }
+
+        async function saveVoltageConfig() {
+            const params = [
+                ['bulkVoltage', parseFloat(document.getElementById('bulkVoltageInput').value)],
+                ['absorptionVoltage', parseFloat(document.getElementById('absorptionVoltageInput').value)],
+                ['floatVoltage', parseFloat(document.getElementById('floatVoltageInput').value)]
+            ];
+
+            await saveMultipleParameters(params, '⚡ Voltajes de carga guardados');
+        }
+
+        async function savePowerSourceConfig() {
+            const params = [
+                ['useFuenteDC', document.getElementById('useFuenteDC').checked],
+                ['fuenteDC_Amps', parseFloat(document.getElementById('fuenteDC_Amps').value) || 0]
+            ];
+
+            await saveMultipleParameters(params, '🌞 Configuración de fuente guardada');
+        }
+
+        async function saveMultipleParameters(params, successMessage) {
+            let success = true;
+            
+            for (const [param, value] of params) {
+                if (typeof value === 'number' && isNaN(value)) {
+                    showAlert(`Valor inválido para ${param}`, 'error');
+                    success = false;
+                    break;
+                }
+                
+                try {
+                    await setParameter(param, value);
+                    await new Promise(resolve => setTimeout(resolve, 300)); // Delay entre comandos
+                } catch (error) {
+                    success = false;
+                    break;
+                }
+            }
+
+            if (success) {
+                showAlert(successMessage);
+                setTimeout(fetchData, 1000); // Actualizar datos después de 1 segundo
+            }
+        }
+
+        async function saveConfiguration() {
+            // Función mantenida para compatibilidad
+            await saveBatteryConfig();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await saveVoltageConfig();
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await savePowerSourceConfig();
+        }
     </style>
 </head>
 <body>
@@ -401,6 +465,7 @@ class WebHandler(BaseHTTPRequestHandler):
         <!-- Dashboard Tab -->
         <div id="dashboard" class="content">
             <div class="grid">
+                <!-- Métricas principales de voltaje y corriente -->
                 <div class="metric">
                     <div class="metric-label">Voltaje Batería</div>
                     <div class="metric-value"><span id="battery-voltage">0.00</span><span class="metric-unit">V</span></div>
@@ -410,11 +475,11 @@ class WebHandler(BaseHTTPRequestHandler):
                     <div class="metric-value"><span id="panel-voltage">0.00</span><span class="metric-unit">V</span></div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">Corriente Panel</div>
+                    <div class="metric-label">Corriente Panel→Batería</div>
                     <div class="metric-value"><span id="panel-current">0.00</span><span class="metric-unit">A</span></div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">Corriente Carga</div>
+                    <div class="metric-label">Corriente Batería→Carga</div>
                     <div class="metric-value"><span id="load-current">0.00</span><span class="metric-unit">A</span></div>
                 </div>
                 <div class="metric">
@@ -425,23 +490,88 @@ class WebHandler(BaseHTTPRequestHandler):
                     <div class="metric-label">Temperatura</div>
                     <div class="metric-value"><span id="temperature">0.0</span><span class="metric-unit">°C</span></div>
                 </div>
+                <!-- PWM con información detallada -->
+                <div class="metric">
+                    <div class="metric-label">PWM Control</div>
+                    <div class="metric-value"><span id="current-pwm-detailed">0</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">LVD (Desconexión)</div>
+                    <div class="metric-value"><span id="lvd">0.00</span><span class="metric-unit">V</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">LVR (Reconexión)</div>
+                    <div class="metric-value"><span id="lvr">0.00</span><span class="metric-unit">V</span></div>
+                </div>
             </div>
 
+            <!-- Estado de carga detallado -->
             <div class="content">
-                <h3>Estado de Carga</h3>
+                <h3>Estado de Carga y Sistema</h3>
                 <div class="grid">
                     <div>
-                        <strong>Estado:</strong> <span id="charge-state" class="state-bulk">UNKNOWN</span><br>
+                        <strong>Estado Actual:</strong> <span id="charge-state" class="state-bulk">UNKNOWN</span><br>
                         <strong>SOC Estimado:</strong> <span id="soc">0</span>%<br>
                         <strong>Ah Acumulados:</strong> <span id="accumulated-ah">0.00</span> Ah<br>
-                        <strong>PWM Actual:</strong> <span id="current-pwm">0</span> (0%)
+                        <strong>Horas Absorción Calc.:</strong> <span id="absorption-hours">0.0</span>h<br>
+                        <strong>Tiempo Máx. Absorción:</strong> <span id="max-absorption-hours">0.0</span>h
                     </div>
                     <div>
-                        <strong>Voltaje BULK:</strong> <span id="bulk-voltage">0.00</span>V<br>
-                        <strong>Voltaje ABSORCIÓN:</strong> <span id="absorption-voltage">0.00</span>V<br>
-                        <strong>Voltaje FLOTACIÓN:</strong> <span id="float-voltage">0.00</span>V<br>
-                        <strong>Tipo Batería:</strong> <span id="battery-type">GEL</span>
+                        <strong>Carga Activada:</strong> <span id="load-control-state">--</span><br>
+                        <strong>Apagado Temporal:</strong> <span id="temp-load-off">--</span><br>
+                        <strong>LED Solar:</strong> <span id="led-solar-state">--</span><br>
+                        <strong>Sensor Paneles:</strong> <span id="panel-sensor-available">--</span><br>
+                        <strong>Firmware:</strong> <span id="firmware-version">--</span>
                     </div>
+                </div>
+            </div>
+
+            <!-- Configuración de voltajes de carga -->
+            <div class="content">
+                <h3>Voltajes de Carga</h3>
+                <div class="grid">
+                    <div>
+                        <strong>BULK:</strong> <span id="bulk-voltage">0.00</span>V<br>
+                        <strong>ABSORCIÓN:</strong> <span id="absorption-voltage">0.00</span>V<br>
+                        <strong>FLOTACIÓN:</strong> <span id="float-voltage">0.00</span>V
+                    </div>
+                    <div>
+                        <strong>Tipo Batería:</strong> <span id="battery-type">GEL</span><br>
+                        <strong>Capacidad:</strong> <span id="battery-capacity-display">0</span> Ah<br>
+                        <strong>Umbral Corriente:</strong> <span id="threshold-percentage-display">0</span>%
+                    </div>
+                </div>
+            </div>
+
+            <!-- Parámetros calculados -->
+            <div class="content">
+                <h3>Parámetros Calculados</h3>
+                <div class="grid">
+                    <div>
+                        <strong>Umbral Absorción:</strong> <span id="absorption-threshold">0</span> mA<br>
+                        <strong>Límite Flotación:</strong> <span id="float-limit">0</span> mA<br>
+                        <strong>Factor Divisor:</strong> <span id="factor-divider">0</span><br>
+                        <strong>Corriente Máxima:</strong> <span id="max-current-display">0</span> mA
+                    </div>
+                    <div>
+                        <strong>Fuente de Energía:</strong> <span id="power-source">Solar</span><br>
+                        <strong>Amperios Fuente DC:</strong> <span id="dc-source-amps">0</span> A<br>
+                        <strong>Tiempo Máx. Bulk:</strong> <span id="max-bulk-hours">0.0</span>h<br>
+                        <strong>Voltaje Máx. Batería:</strong> <span id="max-battery-voltage">0.0</span>V
+                    </div>
+                </div>
+            </div>
+
+            <!-- Nota personalizada y estado detallado -->
+            <div class="content">
+                <h3>Estado del Sistema</h3>
+                <div class="alert alert-info" style="background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb;">
+                    <strong>Nota:</strong> <span id="custom-note">Sistema iniciado</span>
+                </div>
+                <div style="margin-top: 15px;">
+                    <strong>Última actualización:</strong> <span id="last-update-detailed">--</span><br>
+                    <strong>Uptime sistema:</strong> <span id="system-uptime">--</span><br>
+                    <strong>Conexión ESP32:</strong> <span id="esp32-connection">--</span>
                 </div>
             </div>
         </div>
@@ -449,46 +579,120 @@ class WebHandler(BaseHTTPRequestHandler):
         <!-- Configuration Tab -->
         <div id="config" class="content hidden">
             <h3>Configuración de Parámetros</h3>
-            <div class="grid">
-                <div>
-                    <div class="form-group">
-                        <label>Capacidad Batería (Ah):</label>
-                        <input type="number" id="batteryCapacity" step="0.1" min="1" max="1000">
+            
+            <!-- Configuración de Batería -->
+            <div class="content" style="background: #f8f9fa; border-left: 4px solid #007bff;">
+                <h4>🔋 Configuración de Batería</h4>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>Capacidad Batería (Ah):</label>
+                            <input type="number" id="batteryCapacity" step="0.1" min="1" max="1000">
+                            <small style="color: #666;">Capacidad total del banco de baterías</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Umbral Corriente (%):</label>
+                            <input type="number" id="thresholdPercentage" step="0.1" min="0.1" max="5">
+                            <small style="color: #666;">Porcentaje para calcular umbral de absorción</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Batería:</label>
+                            <select id="isLithium">
+                                <option value="false">GEL</option>
+                                <option value="true">Litio</option>
+                            </select>
+                            <small style="color: #666;">Cambia el perfil de carga</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Umbral Corriente (%):</label>
-                        <input type="number" id="thresholdPercentage" step="0.1" min="0.1" max="5">
-                    </div>
-                    <div class="form-group">
-                        <label>Corriente Máxima (mA):</label>
-                        <input type="number" id="maxAllowedCurrent" step="100" min="1000" max="15000">
+                    <div>
+                        <div class="form-group">
+                            <label>Corriente Máxima (mA):</label>
+                            <input type="number" id="maxAllowedCurrent" step="100" min="1000" max="15000">
+                            <small style="color: #666;">Límite de seguridad del sistema</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Factor Divisor:</label>
+                            <input type="number" id="factorDivider" min="1" max="10" value="5" readonly>
+                            <small style="color: #666;">Calculado automáticamente</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Voltaje Máx. Batería (V):</label>
+                            <input type="number" id="maxBatteryVoltageAllowed" step="0.1" min="12" max="16" value="15.0" readonly>
+                            <small style="color: #666;">Límite de protección</small>
+                        </div>
                     </div>
                 </div>
-                <div>
+                <button class="btn btn-primary" onclick="saveBatteryConfig()">💾 Guardar Configuración de Batería</button>
+            </div>
+
+            <!-- Configuración de Voltajes -->
+            <div class="content" style="background: #f8f9fa; border-left: 4px solid #28a745; margin-top: 20px;">
+                <h4>⚡ Voltajes de Carga</h4>
+                <div class="grid">
                     <div class="form-group">
                         <label>Voltaje BULK (V):</label>
                         <input type="number" id="bulkVoltageInput" step="0.1" min="12" max="15">
+                        <small style="color: #666;">Etapa de carga inicial</small>
                     </div>
                     <div class="form-group">
                         <label>Voltaje ABSORCIÓN (V):</label>
                         <input type="number" id="absorptionVoltageInput" step="0.1" min="12" max="15">
+                        <small style="color: #666;">Etapa de saturación</small>
                     </div>
                     <div class="form-group">
                         <label>Voltaje FLOTACIÓN (V):</label>
                         <input type="number" id="floatVoltageInput" step="0.1" min="12" max="15">
+                        <small style="color: #666;">Solo para baterías GEL</small>
                     </div>
                 </div>
+                <button class="btn btn-success" onclick="saveVoltageConfig()">💾 Guardar Voltajes de Carga</button>
             </div>
-            
-            <div class="form-group">
-                <label>Tipo de Batería:</label>
-                <select id="isLithium">
-                    <option value="false">GEL</option>
-                    <option value="true">Litio</option>
-                </select>
+
+            <!-- Configuración de Fuente de Energía -->
+            <div class="content" style="background: #f8f9fa; border-left: 4px solid #ffc107; margin-top: 20px;">
+                <h4>🌞 Fuente de Energía</h4>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="useFuenteDC" style="width: auto; margin-right: 8px;">
+                                Usar Fuente DC (en lugar de paneles solares)
+                            </label>
+                            <small style="color: #666;">Desactivar para usar paneles solares</small>
+                        </div>
+                    </div>
+                    <div id="dc-source-config" style="display: none;">
+                        <div class="form-group">
+                            <label>Amperios Fuente DC:</label>
+                            <input type="number" id="fuenteDC_Amps" step="0.1" min="0" max="50">
+                            <small style="color: #666;">Capacidad de la fuente DC externa</small>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-warning" onclick="savePowerSourceConfig()">💾 Guardar Configuración de Fuente</button>
             </div>
-            
-            <button class="btn btn-primary" onclick="saveConfiguration()">Guardar Configuración</button>
+
+            <!-- Valores Calculados (Solo Lectura) -->
+            <div class="content" style="background: #e9ecef; border-left: 4px solid #6c757d; margin-top: 20px;">
+                <h4>📊 Valores Calculados (Solo Lectura)</h4>
+                <div class="grid">
+                    <div>
+                        <strong>Umbral Corriente Calculado:</strong> <span id="calculated-absorption-threshold">-- mA</span><br>
+                        <strong>Límite en Flotación:</strong> <span id="calculated-float-limit">-- mA</span><br>
+                        <strong>Tiempo Máx. Bulk:</strong> <span id="calculated-max-bulk-hours">-- h</span><br>
+                        <strong>Horas Máx. Absorción:</strong> <span id="calculated-max-absorption-hours">-- h</span>
+                    </div>
+                    <div>
+                        <strong>LVD (Desconexión):</strong> <span id="calculated-lvd">-- V</span><br>
+                        <strong>LVR (Reconexión):</strong> <span id="calculated-lvr">-- V</span><br>
+                        <strong>Voltaje Carga Batería:</strong> <span id="calculated-charged-battery-voltage">-- V</span><br>
+                        <strong>Re-enter Bulk:</strong> <span id="calculated-reenter-bulk">-- V</span>
+                    </div>
+                </div>
+                <small style="color: #666; font-style: italic;">
+                    Estos valores se calculan automáticamente basados en la configuración.
+                </small>
+            </div>
         </div>
 
         <!-- Control Tab -->
@@ -723,6 +927,12 @@ class WebHandler(BaseHTTPRequestHandler):
 
         // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
+            // Event listener para el checkbox de fuente DC
+            document.getElementById('useFuenteDC').addEventListener('change', function() {
+                const dcConfig = document.getElementById('dc-source-config');
+                dcConfig.style.display = this.checked ? 'block' : 'none';
+            });
+
             fetchData();
             setInterval(fetchData, 2000); // Actualizar cada 2 segundos
         });
