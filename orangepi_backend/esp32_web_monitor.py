@@ -1022,7 +1022,7 @@ def main():
         print("Verifica la conexión del ESP32 y recarga la página.")
     
     try:
-        # Ejecutar servidor web
+        # Ejecutar servidor web..........
         run_web_server(monitor, args.web_port, args.web_host)
     except KeyboardInterrupt:
         print("\n⏹️ Interrumpido por usuario")
@@ -1034,3 +1034,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
