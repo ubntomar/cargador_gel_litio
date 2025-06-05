@@ -18,6 +18,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import socketserver
 import urllib.parse
 import os
+import functools
 
 # Configuración de logging
 logging.basicConfig(
@@ -209,10 +210,6 @@ class ESP32Monitor:
 class WebHandler(BaseHTTPRequestHandler):
     """Manejador HTTP para la interfaz web"""
     
-    def __init__(self, monitor, *args, **kwargs):
-        self.monitor = monitor
-        super().__init__(*args, **kwargs)
-    
     def do_GET(self):
         """Manejar peticiones GET"""
         if self.path == '/' or self.path == '/index.html':
@@ -227,7 +224,7 @@ class WebHandler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             
-            data = self.monitor.get_data()
+            data = self.server.monitor.get_data()
             if data:
                 self.wfile.write(json.dumps(data).encode('utf-8'))
             else:
@@ -251,7 +248,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 value = data.get('value')
                 
                 if parameter and value is not None:
-                    success = self.monitor.set_parameter(parameter, value)
+                    success = self.server.monitor.set_parameter(parameter, value)
                     response = {'success': success}
                     if success:
                         response['message'] = f'Parámetro {parameter} actualizado'
@@ -283,7 +280,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 total_seconds = hours * 3600 + minutes * 60 + seconds
                 
                 if total_seconds > 0:
-                    success = self.monitor.toggle_load(total_seconds)
+                    success = self.server.monitor.toggle_load(total_seconds)
                     response = {'success': success, 'duration': total_seconds}
                     if success:
                         response['message'] = f'Carga apagada por {total_seconds} segundos'
@@ -307,7 +304,7 @@ class WebHandler(BaseHTTPRequestHandler):
         
         elif self.path == '/api/cancel_temp_off':
             try:
-                success = self.monitor.cancel_temporary_off()
+                success = self.server.monitor.cancel_temporary_off()
                 response = {'success': success}
                 if success:
                     response['message'] = 'Apagado temporal cancelado'
@@ -331,6 +328,10 @@ class WebHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b'Not Found')
+    
+    def log_message(self, format, *args):
+        """Silenciar logs del servidor HTTP"""
+        pass
     
     def get_html(self):
         """Generar HTML de la interfaz"""
@@ -381,70 +382,6 @@ class WebHandler(BaseHTTPRequestHandler):
             .tabs { flex-direction: column; }
             .countdown-timer { font-size: 28px; }
         }
-
-        async function saveBatteryConfig() {
-            const params = [
-                ['batteryCapacity', parseFloat(document.getElementById('batteryCapacity').value)],
-                ['thresholdPercentage', parseFloat(document.getElementById('thresholdPercentage').value)],
-                ['maxAllowedCurrent', parseFloat(document.getElementById('maxAllowedCurrent').value)],
-                ['isLithium', document.getElementById('isLithium').value === 'true']
-            ];
-
-            await saveMultipleParameters(params, '🔋 Configuración de batería guardada');
-        }
-
-        async function saveVoltageConfig() {
-            const params = [
-                ['bulkVoltage', parseFloat(document.getElementById('bulkVoltageInput').value)],
-                ['absorptionVoltage', parseFloat(document.getElementById('absorptionVoltageInput').value)],
-                ['floatVoltage', parseFloat(document.getElementById('floatVoltageInput').value)]
-            ];
-
-            await saveMultipleParameters(params, '⚡ Voltajes de carga guardados');
-        }
-
-        async function savePowerSourceConfig() {
-            const params = [
-                ['useFuenteDC', document.getElementById('useFuenteDC').checked],
-                ['fuenteDC_Amps', parseFloat(document.getElementById('fuenteDC_Amps').value) || 0]
-            ];
-
-            await saveMultipleParameters(params, '🌞 Configuración de fuente guardada');
-        }
-
-        async function saveMultipleParameters(params, successMessage) {
-            let success = true;
-            
-            for (const [param, value] of params) {
-                if (typeof value === 'number' && isNaN(value)) {
-                    showAlert(`Valor inválido para ${param}`, 'error');
-                    success = false;
-                    break;
-                }
-                
-                try {
-                    await setParameter(param, value);
-                    await new Promise(resolve => setTimeout(resolve, 300)); // Delay entre comandos
-                } catch (error) {
-                    success = false;
-                    break;
-                }
-            }
-
-            if (success) {
-                showAlert(successMessage);
-                setTimeout(fetchData, 1000); // Actualizar datos después de 1 segundo
-            }
-        }
-
-        async function saveConfiguration() {
-            // Función mantenida para compatibilidad
-            await saveBatteryConfig();
-            await new Promise(resolve => setTimeout(resolve, 500));
-            await saveVoltageConfig();
-            await new Promise(resolve => setTimeout(resolve, 500));
-            await savePowerSourceConfig();
-        }
     </style>
 </head>
 <body>
@@ -465,7 +402,6 @@ class WebHandler(BaseHTTPRequestHandler):
         <!-- Dashboard Tab -->
         <div id="dashboard" class="content">
             <div class="grid">
-                <!-- Métricas principales de voltaje y corriente -->
                 <div class="metric">
                     <div class="metric-label">Voltaje Batería</div>
                     <div class="metric-value"><span id="battery-voltage">0.00</span><span class="metric-unit">V</span></div>
@@ -490,88 +426,13 @@ class WebHandler(BaseHTTPRequestHandler):
                     <div class="metric-label">Temperatura</div>
                     <div class="metric-value"><span id="temperature">0.0</span><span class="metric-unit">°C</span></div>
                 </div>
-                <!-- PWM con información detallada -->
                 <div class="metric">
                     <div class="metric-label">PWM Control</div>
                     <div class="metric-value"><span id="current-pwm-detailed">0</span></div>
                 </div>
                 <div class="metric">
-                    <div class="metric-label">LVD (Desconexión)</div>
-                    <div class="metric-value"><span id="lvd">0.00</span><span class="metric-unit">V</span></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">LVR (Reconexión)</div>
-                    <div class="metric-value"><span id="lvr">0.00</span><span class="metric-unit">V</span></div>
-                </div>
-            </div>
-
-            <!-- Estado de carga detallado -->
-            <div class="content">
-                <h3>Estado de Carga y Sistema</h3>
-                <div class="grid">
-                    <div>
-                        <strong>Estado Actual:</strong> <span id="charge-state" class="state-bulk">UNKNOWN</span><br>
-                        <strong>SOC Estimado:</strong> <span id="soc">0</span>%<br>
-                        <strong>Ah Acumulados:</strong> <span id="accumulated-ah">0.00</span> Ah<br>
-                        <strong>Horas Absorción Calc.:</strong> <span id="absorption-hours">0.0</span>h<br>
-                        <strong>Tiempo Máx. Absorción:</strong> <span id="max-absorption-hours">0.0</span>h
-                    </div>
-                    <div>
-                        <strong>Carga Activada:</strong> <span id="load-control-state">--</span><br>
-                        <strong>Apagado Temporal:</strong> <span id="temp-load-off">--</span><br>
-                        <strong>LED Solar:</strong> <span id="led-solar-state">--</span><br>
-                        <strong>Sensor Paneles:</strong> <span id="panel-sensor-available">--</span><br>
-                        <strong>Firmware:</strong> <span id="firmware-version">--</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Configuración de voltajes de carga -->
-            <div class="content">
-                <h3>Voltajes de Carga</h3>
-                <div class="grid">
-                    <div>
-                        <strong>BULK:</strong> <span id="bulk-voltage">0.00</span>V<br>
-                        <strong>ABSORCIÓN:</strong> <span id="absorption-voltage">0.00</span>V<br>
-                        <strong>FLOTACIÓN:</strong> <span id="float-voltage">0.00</span>V
-                    </div>
-                    <div>
-                        <strong>Tipo Batería:</strong> <span id="battery-type">GEL</span><br>
-                        <strong>Capacidad:</strong> <span id="battery-capacity-display">0</span> Ah<br>
-                        <strong>Umbral Corriente:</strong> <span id="threshold-percentage-display">0</span>%
-                    </div>
-                </div>
-            </div>
-
-            <!-- Parámetros calculados -->
-            <div class="content">
-                <h3>Parámetros Calculados</h3>
-                <div class="grid">
-                    <div>
-                        <strong>Umbral Absorción:</strong> <span id="absorption-threshold">0</span> mA<br>
-                        <strong>Límite Flotación:</strong> <span id="float-limit">0</span> mA<br>
-                        <strong>Factor Divisor:</strong> <span id="factor-divider">0</span><br>
-                        <strong>Corriente Máxima:</strong> <span id="max-current-display">0</span> mA
-                    </div>
-                    <div>
-                        <strong>Fuente de Energía:</strong> <span id="power-source">Solar</span><br>
-                        <strong>Amperios Fuente DC:</strong> <span id="dc-source-amps">0</span> A<br>
-                        <strong>Tiempo Máx. Bulk:</strong> <span id="max-bulk-hours">0.0</span>h<br>
-                        <strong>Voltaje Máx. Batería:</strong> <span id="max-battery-voltage">0.0</span>V
-                    </div>
-                </div>
-            </div>
-
-            <!-- Nota personalizada y estado detallado -->
-            <div class="content">
-                <h3>Estado del Sistema</h3>
-                <div class="alert alert-info" style="background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb;">
-                    <strong>Nota:</strong> <span id="custom-note">Sistema iniciado</span>
-                </div>
-                <div style="margin-top: 15px;">
-                    <strong>Última actualización:</strong> <span id="last-update-detailed">--</span><br>
-                    <strong>Uptime sistema:</strong> <span id="system-uptime">--</span><br>
-                    <strong>Conexión ESP32:</strong> <span id="esp32-connection">--</span>
+                    <div class="metric-label">Estado de Carga</div>
+                    <div class="metric-value"><span id="charge-state" class="state-bulk">UNKNOWN</span></div>
                 </div>
             </div>
         </div>
@@ -579,120 +440,36 @@ class WebHandler(BaseHTTPRequestHandler):
         <!-- Configuration Tab -->
         <div id="config" class="content hidden">
             <h3>Configuración de Parámetros</h3>
-            
-            <!-- Configuración de Batería -->
-            <div class="content" style="background: #f8f9fa; border-left: 4px solid #007bff;">
-                <h4>🔋 Configuración de Batería</h4>
-                <div class="grid">
-                    <div>
-                        <div class="form-group">
-                            <label>Capacidad Batería (Ah):</label>
-                            <input type="number" id="batteryCapacity" step="0.1" min="1" max="1000">
-                            <small style="color: #666;">Capacidad total del banco de baterías</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Umbral Corriente (%):</label>
-                            <input type="number" id="thresholdPercentage" step="0.1" min="0.1" max="5">
-                            <small style="color: #666;">Porcentaje para calcular umbral de absorción</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Tipo de Batería:</label>
-                            <select id="isLithium">
-                                <option value="false">GEL</option>
-                                <option value="true">Litio</option>
-                            </select>
-                            <small style="color: #666;">Cambia el perfil de carga</small>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="form-group">
-                            <label>Corriente Máxima (mA):</label>
-                            <input type="number" id="maxAllowedCurrent" step="100" min="1000" max="15000">
-                            <small style="color: #666;">Límite de seguridad del sistema</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Factor Divisor:</label>
-                            <input type="number" id="factorDivider" min="1" max="10" value="5" readonly>
-                            <small style="color: #666;">Calculado automáticamente</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Voltaje Máx. Batería (V):</label>
-                            <input type="number" id="maxBatteryVoltageAllowed" step="0.1" min="12" max="16" value="15.0" readonly>
-                            <small style="color: #666;">Límite de protección</small>
-                        </div>
-                    </div>
+            <div class="grid">
+                <div class="form-group">
+                    <label>Capacidad Batería (Ah):</label>
+                    <input type="number" id="batteryCapacity" step="0.1" min="1" max="1000">
                 </div>
-                <button class="btn btn-primary" onclick="saveBatteryConfig()">💾 Guardar Configuración de Batería</button>
-            </div>
-
-            <!-- Configuración de Voltajes -->
-            <div class="content" style="background: #f8f9fa; border-left: 4px solid #28a745; margin-top: 20px;">
-                <h4>⚡ Voltajes de Carga</h4>
-                <div class="grid">
-                    <div class="form-group">
-                        <label>Voltaje BULK (V):</label>
-                        <input type="number" id="bulkVoltageInput" step="0.1" min="12" max="15">
-                        <small style="color: #666;">Etapa de carga inicial</small>
-                    </div>
-                    <div class="form-group">
-                        <label>Voltaje ABSORCIÓN (V):</label>
-                        <input type="number" id="absorptionVoltageInput" step="0.1" min="12" max="15">
-                        <small style="color: #666;">Etapa de saturación</small>
-                    </div>
-                    <div class="form-group">
-                        <label>Voltaje FLOTACIÓN (V):</label>
-                        <input type="number" id="floatVoltageInput" step="0.1" min="12" max="15">
-                        <small style="color: #666;">Solo para baterías GEL</small>
-                    </div>
+                <div class="form-group">
+                    <label>Umbral Corriente (%):</label>
+                    <input type="number" id="thresholdPercentage" step="0.1" min="0.1" max="5">
                 </div>
-                <button class="btn btn-success" onclick="saveVoltageConfig()">💾 Guardar Voltajes de Carga</button>
-            </div>
-
-            <!-- Configuración de Fuente de Energía -->
-            <div class="content" style="background: #f8f9fa; border-left: 4px solid #ffc107; margin-top: 20px;">
-                <h4>🌞 Fuente de Energía</h4>
-                <div class="grid">
-                    <div>
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" id="useFuenteDC" style="width: auto; margin-right: 8px;">
-                                Usar Fuente DC (en lugar de paneles solares)
-                            </label>
-                            <small style="color: #666;">Desactivar para usar paneles solares</small>
-                        </div>
-                    </div>
-                    <div id="dc-source-config" style="display: none;">
-                        <div class="form-group">
-                            <label>Amperios Fuente DC:</label>
-                            <input type="number" id="fuenteDC_Amps" step="0.1" min="0" max="50">
-                            <small style="color: #666;">Capacidad de la fuente DC externa</small>
-                        </div>
-                    </div>
+                <div class="form-group">
+                    <label>Voltaje BULK (V):</label>
+                    <input type="number" id="bulkVoltage" step="0.1" min="12" max="15">
                 </div>
-                <button class="btn btn-warning" onclick="savePowerSourceConfig()">💾 Guardar Configuración de Fuente</button>
-            </div>
-
-            <!-- Valores Calculados (Solo Lectura) -->
-            <div class="content" style="background: #e9ecef; border-left: 4px solid #6c757d; margin-top: 20px;">
-                <h4>📊 Valores Calculados (Solo Lectura)</h4>
-                <div class="grid">
-                    <div>
-                        <strong>Umbral Corriente Calculado:</strong> <span id="calculated-absorption-threshold">-- mA</span><br>
-                        <strong>Límite en Flotación:</strong> <span id="calculated-float-limit">-- mA</span><br>
-                        <strong>Tiempo Máx. Bulk:</strong> <span id="calculated-max-bulk-hours">-- h</span><br>
-                        <strong>Horas Máx. Absorción:</strong> <span id="calculated-max-absorption-hours">-- h</span>
-                    </div>
-                    <div>
-                        <strong>LVD (Desconexión):</strong> <span id="calculated-lvd">-- V</span><br>
-                        <strong>LVR (Reconexión):</strong> <span id="calculated-lvr">-- V</span><br>
-                        <strong>Voltaje Carga Batería:</strong> <span id="calculated-charged-battery-voltage">-- V</span><br>
-                        <strong>Re-enter Bulk:</strong> <span id="calculated-reenter-bulk">-- V</span>
-                    </div>
+                <div class="form-group">
+                    <label>Voltaje ABSORCIÓN (V):</label>
+                    <input type="number" id="absorptionVoltage" step="0.1" min="12" max="15">
                 </div>
-                <small style="color: #666; font-style: italic;">
-                    Estos valores se calculan automáticamente basados en la configuración.
-                </small>
+                <div class="form-group">
+                    <label>Voltaje FLOTACIÓN (V):</label>
+                    <input type="number" id="floatVoltage" step="0.1" min="12" max="15">
+                </div>
+                <div class="form-group">
+                    <label>Tipo de Batería:</label>
+                    <select id="isLithium">
+                        <option value="false">GEL</option>
+                        <option value="true">Litio</option>
+                    </select>
+                </div>
             </div>
+            <button class="btn btn-primary" onclick="saveConfiguration()">Guardar Configuración</button>
         </div>
 
         <!-- Control Tab -->
@@ -756,11 +533,9 @@ class WebHandler(BaseHTTPRequestHandler):
             if (currentData.temporaryLoadOff && currentData.loadOffRemainingSeconds > 0) {
                 document.getElementById('countdown-timer').textContent = formatTime(currentData.loadOffRemainingSeconds);
                 document.getElementById('countdown-status').textContent = 'Carga Temporalmente Apagada';
-                document.querySelector('.countdown').style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
             } else {
                 document.getElementById('countdown-timer').textContent = '00:00:00';
                 document.getElementById('countdown-status').textContent = 'Carga Activa';
-                document.querySelector('.countdown').style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
             }
         }
 
@@ -773,7 +548,7 @@ class WebHandler(BaseHTTPRequestHandler):
             document.getElementById('status-indicator').className = 'status connected';
             document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
 
-            // Métricas principales
+            // Actualizar métricas
             document.getElementById('battery-voltage').textContent = (currentData.voltageBatterySensor2 || 0).toFixed(2);
             document.getElementById('panel-voltage').textContent = (currentData.voltagePanel || 0).toFixed(2);
             document.getElementById('panel-current').textContent = ((currentData.panelToBatteryCurrent || 0) / 1000).toFixed(2);
@@ -781,33 +556,14 @@ class WebHandler(BaseHTTPRequestHandler):
             document.getElementById('net-current').textContent = ((currentData.netCurrent || 0) / 1000).toFixed(2);
             document.getElementById('temperature').textContent = (currentData.temperature || 0).toFixed(1);
 
-            // Estado de carga
+            const pwm = currentData.currentPWM || 0;
+            const pwmPercent = Math.round((pwm / 255) * 100);
+            document.getElementById('current-pwm-detailed').textContent = `${pwm} (${pwmPercent}%)`;
+
             const stateElement = document.getElementById('charge-state');
             const state = currentData.chargeState || 'UNKNOWN';
             stateElement.textContent = state;
             stateElement.className = `state-${state.toLowerCase().replace('_', '-')}`;
-
-            document.getElementById('soc').textContent = Math.round(currentData.estimatedSOC || 0);
-            document.getElementById('accumulated-ah').textContent = (currentData.accumulatedAh || 0).toFixed(2);
-            
-            const pwm = currentData.currentPWM || 0;
-            const pwmPercent = Math.round((pwm / 255) * 100);
-            document.getElementById('current-pwm').textContent = `${pwm} (${pwmPercent}%)`;
-
-            // Voltajes
-            document.getElementById('bulk-voltage').textContent = (currentData.bulkVoltage || 0).toFixed(2);
-            document.getElementById('absorption-voltage').textContent = (currentData.absorptionVoltage || 0).toFixed(2);
-            document.getElementById('float-voltage').textContent = (currentData.floatVoltage || 0).toFixed(2);
-            document.getElementById('battery-type').textContent = currentData.isLithium ? 'Litio' : 'GEL';
-
-            // Configuración
-            document.getElementById('batteryCapacity').value = currentData.batteryCapacity || 50;
-            document.getElementById('thresholdPercentage').value = currentData.thresholdPercentage || 1;
-            document.getElementById('maxAllowedCurrent').value = currentData.maxAllowedCurrent || 6000;
-            document.getElementById('bulkVoltageInput').value = currentData.bulkVoltage || 14.4;
-            document.getElementById('absorptionVoltageInput').value = currentData.absorptionVoltage || 14.4;
-            document.getElementById('floatVoltageInput').value = currentData.floatVoltage || 13.6;
-            document.getElementById('isLithium').value = currentData.isLithium ? 'true' : 'false';
 
             updateCountdown();
         }
@@ -848,10 +604,9 @@ class WebHandler(BaseHTTPRequestHandler):
             const params = [
                 ['batteryCapacity', parseFloat(document.getElementById('batteryCapacity').value)],
                 ['thresholdPercentage', parseFloat(document.getElementById('thresholdPercentage').value)],
-                ['maxAllowedCurrent', parseFloat(document.getElementById('maxAllowedCurrent').value)],
-                ['bulkVoltage', parseFloat(document.getElementById('bulkVoltageInput').value)],
-                ['absorptionVoltage', parseFloat(document.getElementById('absorptionVoltageInput').value)],
-                ['floatVoltage', parseFloat(document.getElementById('floatVoltageInput').value)],
+                ['bulkVoltage', parseFloat(document.getElementById('bulkVoltage').value)],
+                ['absorptionVoltage', parseFloat(document.getElementById('absorptionVoltage').value)],
+                ['floatVoltage', parseFloat(document.getElementById('floatVoltage').value)],
                 ['isLithium', document.getElementById('isLithium').value === 'true']
             ];
 
@@ -865,7 +620,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 
                 try {
                     await setParameter(param, value);
-                    await new Promise(resolve => setTimeout(resolve, 200)); // Delay entre comandos
+                    await new Promise(resolve => setTimeout(resolve, 200));
                 } catch (error) {
                     success = false;
                     break;
@@ -927,36 +682,24 @@ class WebHandler(BaseHTTPRequestHandler):
 
         // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
-            // Event listener para el checkbox de fuente DC
-            document.getElementById('useFuenteDC').addEventListener('change', function() {
-                const dcConfig = document.getElementById('dc-source-config');
-                dcConfig.style.display = this.checked ? 'block' : 'none';
-            });
-
             fetchData();
-            setInterval(fetchData, 2000); // Actualizar cada 2 segundos
+            setInterval(fetchData, 2000);
         });
     </script>
 </body>
 </html>'''
 
-    def log_message(self, format, *args):
-        """Silenciar logs del servidor HTTP"""
-        pass
-
-def create_handler_class(monitor):
-    """Crear clase handler con monitor"""
-    return lambda *args, **kwargs: WebHandler(monitor, *args, **kwargs)
+class CustomHTTPServer(HTTPServer):
+    """Servidor HTTP personalizado que incluye el monitor"""
+    def __init__(self, server_address, RequestHandlerClass, monitor):
+        self.monitor = monitor
+        super().__init__(server_address, RequestHandlerClass)
 
 def run_web_server(monitor, port=8080, host="0.0.0.0"):
     """Ejecutar servidor web"""
-    handler_class = create_handler_class(monitor)
-    
     try:
-        # Permitir reutilizar la dirección para evitar errores "Address already in use"
-        socketserver.TCPServer.allow_reuse_address = True
-        
-        with socketserver.TCPServer((host, port), handler_class) as httpd:
+        # Usar servidor personalizado que incluye el monitor
+        with CustomHTTPServer((host, port), WebHandler, monitor) as httpd:
             # Obtener la IP local para mostrar al usuario
             import socket
             hostname = socket.gethostname()
@@ -994,7 +737,7 @@ def main():
     parser = argparse.ArgumentParser(description='ESP32 Cargador Solar - Monitor Web')
     parser.add_argument('--port', default='/dev/ttyS5', help='Puerto serial (default: /dev/ttyS5)')
     parser.add_argument('--baudrate', type=int, default=9600, help='Velocidad serial (default: 9600)')
-    parser.add_argument('--web-host', default='0.0.0.0', help='Dirección del servidor web (default: 0.0.0.0 - todas las interfaces)')
+    parser.add_argument('--web-host', default='0.0.0.0', help='Dirección del servidor web (default: 0.0.0.0)')
     parser.add_argument('--web-port', type=int, default=8080, help='Puerto del servidor web (default: 8080)')
     parser.add_argument('--debug', action='store_true', help='Habilitar logging debug')
     
@@ -1022,7 +765,7 @@ def main():
         print("Verifica la conexión del ESP32 y recarga la página.")
     
     try:
-        # Ejecutar servidor web..........
+        # Ejecutar servidor web
         run_web_server(monitor, args.web_port, args.web_host)
     except KeyboardInterrupt:
         print("\n⏹️ Interrumpido por usuario")
@@ -1034,4 +777,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
