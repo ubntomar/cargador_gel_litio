@@ -738,15 +738,41 @@ def create_handler_class(monitor):
     """Crear clase handler con monitor"""
     return lambda *args, **kwargs: WebHandler(monitor, *args, **kwargs)
 
-def run_web_server(monitor, port=8080):
+def run_web_server(monitor, port=8080, host="0.0.0.0"):
     """Ejecutar servidor web"""
     handler_class = create_handler_class(monitor)
     
     try:
-        with socketserver.TCPServer(("", port), handler_class) as httpd:
-            print(f"🌐 Servidor web iniciado en http://localhost:{port}")
+        # Permitir reutilizar la dirección para evitar errores "Address already in use"
+        socketserver.TCPServer.allow_reuse_address = True
+        
+        with socketserver.TCPServer((host, port), handler_class) as httpd:
+            # Obtener la IP local para mostrar al usuario
+            import socket
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            
+            print(f"🌐 Servidor web iniciado y accesible desde:")
+            print(f"   📍 Local: http://localhost:{port}")
+            print(f"   📍 Red local: http://{local_ip}:{port}")
+            print(f"   📍 Todas las interfaces: http://0.0.0.0:{port}")
             print(f"📡 Puerto ESP32: {monitor.config.port}")
             print("🔄 Presiona Ctrl+C para detener")
+            
+            # Mostrar IPs disponibles
+            try:
+                import subprocess
+                result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=2)
+                if result.returncode == 0:
+                    ips = result.stdout.strip().split()
+                    print(f"🌐 IPs disponibles en este dispositivo:")
+                    for ip in ips:
+                        if ip.strip():
+                            print(f"   📍 http://{ip.strip()}:{port}")
+            except:
+                pass
+            
+            print("=" * 60)
             httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n⏹️ Servidor detenido")
@@ -758,6 +784,7 @@ def main():
     parser = argparse.ArgumentParser(description='ESP32 Cargador Solar - Monitor Web')
     parser.add_argument('--port', default='/dev/ttyS5', help='Puerto serial (default: /dev/ttyS5)')
     parser.add_argument('--baudrate', type=int, default=9600, help='Velocidad serial (default: 9600)')
+    parser.add_argument('--web-host', default='0.0.0.0', help='Dirección del servidor web (default: 0.0.0.0 - todas las interfaces)')
     parser.add_argument('--web-port', type=int, default=8080, help='Puerto del servidor web (default: 8080)')
     parser.add_argument('--debug', action='store_true', help='Habilitar logging debug')
     
@@ -786,7 +813,7 @@ def main():
     
     try:
         # Ejecutar servidor web
-        run_web_server(monitor, args.web_port)
+        run_web_server(monitor, args.web_port, args.web_host)
     except KeyboardInterrupt:
         print("\n⏹️ Interrumpido por usuario")
     except Exception as e:
