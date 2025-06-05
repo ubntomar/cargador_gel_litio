@@ -1921,21 +1921,75 @@
             return 'success';
         }
 
+
+
         function updateConfigUI() {
-            // Get all inputs with data-param attribute
-            document.querySelectorAll('#configuration-tab-pane [data-param]').forEach(input => {
-                const paramName = input.dataset.param;
-                if (currentData.hasOwnProperty(paramName)) {
-                    if (input.type === 'checkbox') {
-                        input.checked = currentData[paramName];
-                    } else if (input.tagName === 'TEXTAREA') {
-                        input.value = currentData[paramName] || '';
+            console.log('🔄 Actualizando interfaz de configuración con datos:', currentData);
+            
+            // Lista de parámetros a actualizar con sus elementos correspondientes
+            const parameterMappings = {
+                'batteryCapacity': 'batteryCapacity',
+                'thresholdPercentage': 'thresholdPercentage', 
+                'maxAllowedCurrent': 'maxAllowedCurrent',
+                'bulkVoltage': 'bulkVoltage',
+                'absorptionVoltage': 'absorptionVoltage',
+                'floatVoltage': 'floatVoltage',
+                'isLithium': 'isLithium',
+                'useFuenteDC': 'useFuenteDC',
+                'fuenteDC_Amps': 'fuenteDC_Amps'
+            };
+            
+            // Actualizar cada parámetro
+            Object.entries(parameterMappings).forEach(([dataKey, elementId]) => {
+                const element = document.getElementById(elementId);
+                
+                if (element && currentData.hasOwnProperty(dataKey)) {
+                    const value = currentData[dataKey];
+                    
+                    if (element.type === 'checkbox') {
+                        // Para checkboxes
+                        const newChecked = Boolean(value);
+                        if (element.checked !== newChecked) {
+                            element.checked = newChecked;
+                            console.log(`✅ ${dataKey}: ${element.checked}`);
+                        }
+                    } else if (element.tagName === 'SELECT') {
+                        // Para selects (como isLithium)
+                        const newValue = String(value);
+                        if (element.value !== newValue) {
+                            element.value = newValue;
+                            console.log(`✅ ${dataKey}: ${element.value}`);
+                        }
                     } else {
-                        input.value = currentData[paramName] || '';
+                        // Para inputs de texto/número
+                        const newValue = String(value);
+                        if (element.value !== newValue) {
+                            element.value = newValue;
+                            console.log(`✅ ${dataKey}: ${element.value}`);
+                        }
                     }
+                } else {
+                    console.warn(`⚠️ Elemento no encontrado o datos faltantes: ${elementId}`, {
+                        elementExists: !!element,
+                        dataExists: currentData.hasOwnProperty(dataKey),
+                        dataValue: currentData[dataKey]
+                    });
                 }
             });
+            
+            // Actualizar campos calculados (solo lectura)
+            updateCalculatedValues();
+            
+            // Actualizar visibilidad del contenedor de fuente DC
+            const useFuenteDC = currentData.useFuenteDC;
+            const container = document.getElementById('fuenteDC-container');
+            if (container) {
+                container.style.display = useFuenteDC ? 'block' : 'none';
+                console.log(`✅ Contenedor DC: ${useFuenteDC ? 'visible' : 'oculto'}`);
+            }
         }
+
+
 
         function updateLoadControlUI() {
             const currentLoadStatus = document.getElementById('current-load-status');
@@ -2326,7 +2380,11 @@
             const configTab = document.getElementById('configuration-tab');
             if (configTab) {
                 configTab.addEventListener('click', () => {
-                    setTimeout(updateConfigUI, 100);
+                    setTimeout(() => {
+                        updateConfigUI();
+                        // AGREGAR ESTA LÍNEA DE DEBUG:
+                        debugConfigValues();
+                    }, 100);
                 });
             }
 
@@ -2440,7 +2498,11 @@
                     }
                 });
             }
-            
+            // Forzar sincronización inicial después de 3 segundos
+            setTimeout(() => {
+                console.log('🔄 Sincronización inicial de configuración...');
+                forceConfigSync();
+            }, 3000);    
             // Inicializar inmediatamente el scheduler (sin UI)
             nightScheduler.startScheduler();
             
@@ -2526,6 +2588,64 @@
                 updateReadOnlyField('display-LVR', (currentData.LVR || 0).toFixed(1), ' V');
             }
         }
+
+        function debugConfigValues() {
+        console.log('🔍 DEBUG: Valores actuales en la interfaz:');
+        
+        const elements = [
+            'batteryCapacity', 'thresholdPercentage', 'maxAllowedCurrent',
+            'bulkVoltage', 'absorptionVoltage', 'floatVoltage', 
+            'isLithium', 'useFuenteDC', 'fuenteDC_Amps'
+        ];
+        
+        elements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                console.log(`${id}: ${el.type === 'checkbox' ? el.checked : el.value}`);
+            } else {
+                console.log(`${id}: ELEMENTO NO ENCONTRADO`);
+            }
+        });
+        
+        console.log('🔍 DEBUG: Datos del servidor:');
+        console.log('batteryCapacity:', currentData.batteryCapacity);
+        console.log('thresholdPercentage:', currentData.thresholdPercentage);
+        console.log('isLithium:', currentData.isLithium);
+        console.log('useFuenteDC:', currentData.useFuenteDC);
+    }
+
+        // Forzar sincronización de configuración
+
+        function forceConfigSync() {
+            console.log('🔧 Forzando sincronización de configuración...');
+            
+            // Esperar a que los datos estén disponibles
+            if (!currentData || Object.keys(currentData).length === 0) {
+                console.log('⏳ Esperando datos del servidor...');
+                setTimeout(forceConfigSync, 1000);
+                return;
+            }
+            
+            // Forzar actualización de cada campo individualmente
+            const batteryCapacityEl = document.getElementById('batteryCapacity');
+            if (batteryCapacityEl && currentData.batteryCapacity !== undefined) {
+                batteryCapacityEl.value = String(currentData.batteryCapacity);
+                console.log('🔋 Battery Capacity forzado a:', currentData.batteryCapacity);
+            }
+            
+            const thresholdEl = document.getElementById('thresholdPercentage');
+            if (thresholdEl && currentData.thresholdPercentage !== undefined) {
+                thresholdEl.value = String(currentData.thresholdPercentage);
+                console.log('📊 Threshold Percentage forzado a:', currentData.thresholdPercentage);
+            }
+            
+            // Verificar que los valores se aplicaron correctamente
+            setTimeout(() => {
+                debugConfigValues();
+            }, 500);
+        }
+
+
 
         // Modificar la función updateConfigUI existente
         const originalUpdateConfigUI = updateConfigUI;
