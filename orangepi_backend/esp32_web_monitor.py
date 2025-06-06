@@ -450,6 +450,10 @@ class WebHandler(BaseHTTPRequestHandler):
                     <div class="metric-label">Nota</div>
                     <div class="metric-value"><span id="note-text">-</span></div>
                 </div>
+                div class="metric">
+                    <div class="metric-label">Umbral de corriente en float</div>
+                    <div class="metric-value"><span id="threshold-percentage">0.0</span><span class="metric-unit">%</span></div>
+
             </div>
         </div>
 
@@ -597,7 +601,7 @@ class WebHandler(BaseHTTPRequestHandler):
             stateElement.className = `state-${state.toLowerCase().replace('_', '-')}`;
 
             document.getElementById('note-text').textContent = currentData.notaPersonalizada || '-';
-
+            document.getElementById('threshold-percentage').textContent = (currentData.thresholdPercentage || 0).toFixed(1);
             updateCountdown();
         }
 

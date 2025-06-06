@@ -567,6 +567,11 @@ void setLEDSolarRobust(int state) {
 void setup() {
   Serial.begin(9600);
   delay(1000);
+
+  // Deshabilitar logs de error I2C para evitar spam en el puerto serial
+  esp_log_level_set("i2c.master", ESP_LOG_NONE);
+  esp_log_level_set("i2c", ESP_LOG_WARN);
+
   Serial.println("Iniciando sensores INA219...");
 
   // Pines de control
