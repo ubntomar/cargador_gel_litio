@@ -457,6 +457,7 @@ void handleSetCommand(String cmd) {
 }
 
 
+
 void handleToggleLoad(String cmd) {
   int colonIndex = cmd.indexOf(':');
   if (colonIndex == -1) {
@@ -468,27 +469,39 @@ void handleToggleLoad(String cmd) {
   
   Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(seconds) + " segundos");
   
-  // CAMBIO: Aumentar límite a 43200 segundos (12 horas)
   if (seconds >= 1 && seconds <= 43200) {
-    if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
+    // ✅ SOLUCIÓN: Verificar estado solo para decidir si apagar el pin
+    bool wasOn = (digitalRead(LOAD_CONTROL_PIN) == HIGH);
+    
+    // Apagar pin solo si estaba encendido
+    if (wasOn) {
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-      temporaryLoadOff = true;
-      loadOffStartTime = millis();
-      loadOffDuration = seconds * 1000UL; // UL para evitar overflow
-      
+    }
+    
+    // ✅ SIEMPRE actualizar timers (estuviera ON o ya OFF)
+    temporaryLoadOff = true;
+    loadOffStartTime = millis();
+    loadOffDuration = seconds * 1000UL;
+    
+    // Mensaje más descriptivo
+    if (wasOn) {
       notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos (Orange Pi)";
-      OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
       Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(seconds) + " segundos");
     } else {
-      OrangePiSerial.println("OK:Load already off");
-      Serial.println("⚠️ [Orange Pi] La carga ya estaba apagada");
+      notaPersonalizada = "Timer apagado actualizado a " + String(seconds) + " segundos (Orange Pi)";
+      Serial.println("🔌 [Orange Pi] ✅ Timer actualizado a " + String(seconds) + " segundos (carga ya estaba OFF)");
     }
+    
+    // ✅ RESPUESTA UNIFICADA: Siempre confirma el nuevo tiempo
+    OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
+    
   } else {
     String errorMsg = "ERROR:Invalid time range (1-43200 seconds), received: " + String(seconds);
     OrangePiSerial.println(errorMsg);
     Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(seconds) + " segundos");
   }
 }
+
 
 
 void periodicSerialUpdate() {
