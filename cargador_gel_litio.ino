@@ -51,7 +51,7 @@ String notaPersonalizada = "";
 // Estado del sensor de paneles
 bool ina219_1_available = false;
 unsigned long lastPanelSensorCheck = 0;
-const unsigned long PANEL_SENSOR_CHECK_INTERVAL = 10000; // 10 segundos
+const unsigned long PANEL_SENSOR_CHECK_INTERVAL = 60000; // ms segundos
 
 
 // Parámetros de carga para baterías de gel
@@ -94,7 +94,7 @@ float batteryToLoadCurrent = 0;
 
 // ========== VARIABLES PARA TIMING NO BLOQUEANTE ==========
 unsigned long previousMainLoopTime = 0;
-const unsigned long MAIN_LOOP_INTERVAL = 1000; // 1 segundo en milisegundos
+const unsigned long MAIN_LOOP_INTERVAL = 2000; // 1 segundo en milisegundos
 
 // Parámetros de control de voltaje ya están en config.h
 // const float LVD = 12.0;
@@ -537,9 +537,9 @@ void checkPanelSensorAvailability() {
 
 // Función para leer corriente de paneles con manejo de errores
 float getPanelCurrent() {
-  if (!ina219_1_available) {
-    return 0.0; // Sin sensor = sin corriente de paneles
-  }
+  // if (!ina219_1_available) {
+  //   return 0.0; // Sin sensor = sin corriente de paneles
+  // }
   
   float totalCurrent = 0;
   int validSamples = 0;
@@ -550,13 +550,13 @@ float getPanelCurrent() {
       totalCurrent += current_mA;
       validSamples++;
     } else {
-      // Error de comunicación - marcar como no disponible
-      ina219_1_available = false;
-      Serial.println("❌ Sensor de paneles perdió comunicación");
-      notaPersonalizada = "Sensor de paneles desconectado";
-      return 0.0;
+      // // Error de comunicación - marcar como no disponible
+      // ina219_1_available = false;
+      // Serial.println("❌ Sensor de paneles perdió comunicación");
+      // notaPersonalizada = "Sensor de paneles desconectado";
+      // return 0.0;
     }
-    delay(5);
+    delay(10);
   }
   
   if (validSamples == 0) return 0.0;
@@ -939,19 +939,19 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
 
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-      setPWM(20);
+      setPWM(1);
       notaPersonalizada = "estoy en la sección Error"; 
-      while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
-          batteryVoltage >= maxBatteryVoltageAllowed ) {
-          //pinMode(LED_SOLAR, OUTPUT);
-          delay(100);
-          digitalWrite(LED_SOLAR, LOW);
-          delay(100);
-          digitalWrite(LED_SOLAR, HIGH);
-          delay(100);
-          esp_task_wdt_reset();  // Reset para evitar reinicio
-          batteryVoltage = ina219_2.getBusVoltage_V();
-      }
+      // while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
+      //     batteryVoltage >= maxBatteryVoltageAllowed ) {
+      //     //pinMode(LED_SOLAR, OUTPUT);
+      //     delay(100);
+      //     digitalWrite(LED_SOLAR, LOW);
+      //     delay(100);
+      //     digitalWrite(LED_SOLAR, HIGH);
+      //     delay(100);
+      //     esp_task_wdt_reset();  // Reset para evitar reinicio
+      //     batteryVoltage = ina219_2.getBusVoltage_V();
+      // }
       currentState =ABSORPTION_CHARGE;
       break;
   }
@@ -1095,8 +1095,8 @@ void executeMainLoopTasks() {
   Serial.println(bulkVoltage);
 
   if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
-    currentPWM = 0;
-    Serial.println("Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
+    //currentPWM = 0;
+    Serial.println("Desabilitado:Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
   }
 
   // Control de voltaje (LVD y LVR)
