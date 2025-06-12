@@ -8,6 +8,10 @@
 #include "web_server.h"    // Incluir el archivo del servidor web
 
 
+// Límite máximo de apagado (8 horas = 28800 segundos)
+const unsigned long MAX_LOAD_OFF_DURATION = 28800000UL; // 8 horas en milisegundos
+const unsigned long MAX_LOAD_OFF_SECONDS = 28800UL;     // 8 horas en segundos
+
 // ========== PROTOCOLO SERIAL ORANGE PI ==========
 // Definir pines para UART0 (comunicación con Orange Pi)
 #define RX_PIN_SERIAL 20  // GPIO20 - Pin RX físico
@@ -85,6 +89,13 @@ unsigned long bulkStartTime = 0;
 
 ChargeState currentState = BULK_CHARGE;
 
+// Variables para validación de corriente baja (no bloqueante)
+static int lowCurrentConfirmations = 0;
+static unsigned long lastLowCurrentCheck = 0;
+static bool validatingLowCurrent = false;
+const int REQUIRED_CONFIRMATIONS = 5;
+const unsigned long CONFIRMATION_INTERVAL = 100; // 100ms entre confirmaciones
+
 // Variable global de PWM (0-255 antes de invertir)
 int currentPWM = 0;
 
@@ -94,7 +105,7 @@ float batteryToLoadCurrent = 0;
 
 // ========== VARIABLES PARA TIMING NO BLOQUEANTE ==========
 unsigned long previousMainLoopTime = 0;
-const unsigned long MAIN_LOOP_INTERVAL = 2000; // 1 segundo en milisegundos
+const unsigned long MAIN_LOOP_INTERVAL = 1000; // 1 segundo en milisegundos
 
 // Parámetros de control de voltaje ya están en config.h
 // const float LVD = 12.0;
@@ -264,14 +275,21 @@ void sendDataToOrangePi() {
   if (temporaryLoadOff) {
     unsigned long remainingTime = 0;
     unsigned long elapsed = millis() - loadOffStartTime;
-    if (elapsed < loadOffDuration) {
-      remainingTime = (loadOffDuration - elapsed) / 1000; // Convertir a segundos
+    
+    // ✅ NUEVA LÓGICA: Considerar tanto duración programada como límite máximo
+    unsigned long effectiveDuration = min(loadOffDuration, MAX_LOAD_OFF_DURATION);
+    
+    if (elapsed < effectiveDuration) {
+      remainingTime = (effectiveDuration - elapsed) / 1000; // Convertir a segundos
     }
+    
     json += "\"loadOffRemainingSeconds\":" + String(remainingTime) + ",";
-    json += "\"loadOffDuration\":" + String(loadOffDuration / 1000) + ",";
+    json += "\"loadOffDuration\":" + String(effectiveDuration / 1000) + ",";
+    json += "\"loadOffMaxDuration\":" + String(MAX_LOAD_OFF_SECONDS) + ",";  // NUEVO campo
   } else {
     json += "\"loadOffRemainingSeconds\":0,";
     json += "\"loadOffDuration\":0,";
+    json += "\"loadOffMaxDuration\":" + String(MAX_LOAD_OFF_SECONDS) + ",";  // NUEVO campo
   }
   
   // === ESTADO DEL SISTEMA ===
@@ -457,6 +475,25 @@ void handleSetCommand(String cmd) {
 }
 
 
+unsigned long validateLoadOffDuration(unsigned long requestedSeconds) {
+  /**
+   * Validar y limitar duración de apagado a máximo 8 horas
+   * Medida de seguridad crítica
+   */
+  if (requestedSeconds > MAX_LOAD_OFF_SECONDS) {
+    Serial.println("⚠️ ADVERTENCIA: Duración solicitada excede 8 horas");
+    Serial.println("   Limitando a 8 horas por seguridad");
+    notaPersonalizada = "Duración limitada a 8h por seguridad";
+    return MAX_LOAD_OFF_SECONDS;
+  }
+  
+  if (requestedSeconds < 1) {
+    Serial.println("⚠️ ADVERTENCIA: Duración mínima 1 segundo");
+    return 1;
+  }
+  
+  return requestedSeconds;
+}
 
 void handleToggleLoad(String cmd) {
   int colonIndex = cmd.indexOf(':');
@@ -465,11 +502,18 @@ void handleToggleLoad(String cmd) {
     return;
   }
   
-  int seconds = cmd.substring(colonIndex + 1).toInt();
+  unsigned long requestedSeconds = cmd.substring(colonIndex + 1).toInt();
   
-  Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(seconds) + " segundos");
+  Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(requestedSeconds) + " segundos");
   
-  if (seconds >= 1 && seconds <= 43200) {
+  // ✅ NUEVA VALIDACIÓN: Aplicar límite de 8 horas
+  unsigned long validatedSeconds = validateLoadOffDuration(requestedSeconds);
+  
+  if (validatedSeconds != requestedSeconds) {
+    Serial.println("🛡️ Duración ajustada por seguridad: " + String(requestedSeconds) + "s → " + String(validatedSeconds) + "s");
+  }
+  
+  if (validatedSeconds >= 1 && validatedSeconds <= MAX_LOAD_OFF_SECONDS) {
     // ✅ SOLUCIÓN: Verificar estado solo para decidir si apagar el pin
     bool wasOn = (digitalRead(LOAD_CONTROL_PIN) == HIGH);
     
@@ -481,27 +525,26 @@ void handleToggleLoad(String cmd) {
     // ✅ SIEMPRE actualizar timers (estuviera ON o ya OFF)
     temporaryLoadOff = true;
     loadOffStartTime = millis();
-    loadOffDuration = seconds * 1000UL;
+    loadOffDuration = validatedSeconds * 1000UL;  // Usar duración validada
     
     // Mensaje más descriptivo
     if (wasOn) {
-      notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos (Orange Pi)";
-      Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(seconds) + " segundos");
+      notaPersonalizada = "Carga apagada por " + String(validatedSeconds) + " segundos (Orange Pi)";
+      Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(validatedSeconds) + " segundos");
     } else {
-      notaPersonalizada = "Timer apagado actualizado a " + String(seconds) + " segundos (Orange Pi)";
-      Serial.println("🔌 [Orange Pi] ✅ Timer actualizado a " + String(seconds) + " segundos (carga ya estaba OFF)");
+      notaPersonalizada = "Timer apagado actualizado a " + String(validatedSeconds) + " segundos (Orange Pi)";
+      Serial.println("🔌 [Orange Pi] ✅ Timer actualizado a " + String(validatedSeconds) + " segundos (carga ya estaba OFF)");
     }
     
-    // ✅ RESPUESTA UNIFICADA: Siempre confirma el nuevo tiempo
-    OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
+    // ✅ RESPUESTA CON DURACIÓN VALIDADA
+    OrangePiSerial.println("OK:Load turned off for " + String(validatedSeconds) + " seconds");
     
   } else {
-    String errorMsg = "ERROR:Invalid time range (1-43200 seconds), received: " + String(seconds);
+    String errorMsg = "ERROR:Invalid time range (1-" + String(MAX_LOAD_OFF_SECONDS) + " seconds), received: " + String(requestedSeconds);
     OrangePiSerial.println(errorMsg);
-    Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(seconds) + " segundos");
+    Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(requestedSeconds) + " segundos");
   }
 }
-
 
 
 void periodicSerialUpdate() {
@@ -577,6 +620,57 @@ void setLEDSolarRobust(int state) {
     digitalWrite(LED_SOLAR, state);
 }
 
+
+void validateLowCurrentAndControlPWM(float currentPanelCurrent) {
+  unsigned long currentTime = millis();
+  
+  // Si la corriente es mayor a 10.0 mA, resetear validación
+  if (currentPanelCurrent > 10.0) {
+    if (validatingLowCurrent || lowCurrentConfirmations > 0) {
+      // Resetear contador si la corriente vuelve a niveles normales
+      lowCurrentConfirmations = 0;
+      validatingLowCurrent = false;
+      Serial.println("✅ Corriente de paneles OK - Validación reseteada");
+    }
+    return; // Salir - no necesitamos validar
+  }
+  
+  // Si la corriente es <= 10.0 mA y el PWM no es 0, iniciar/continuar validación
+  if (currentPWM != 0) {
+    
+    // Iniciar proceso de validación si no está activo
+    if (!validatingLowCurrent) {
+      validatingLowCurrent = true;
+      lowCurrentConfirmations = 0;
+      lastLowCurrentCheck = currentTime;
+      Serial.println("⚠️ Iniciando validación de corriente baja...");
+      return;
+    }
+    
+    // Verificar si es tiempo de hacer otra confirmación
+    if (currentTime - lastLowCurrentCheck >= CONFIRMATION_INTERVAL) {
+      lowCurrentConfirmations++;
+      lastLowCurrentCheck = currentTime;
+      
+      Serial.printf("🔍 Confirmación %d/%d - Corriente: %.1f mA\n", 
+                    lowCurrentConfirmations, REQUIRED_CONFIRMATIONS, currentPanelCurrent);
+      
+      // Si hemos confirmado suficientes veces, aplicar PWM = 0
+      if (lowCurrentConfirmations >= REQUIRED_CONFIRMATIONS) {
+        currentPWM = 0;
+        setPWM(currentPWM); // Asegurar que se aplique el cambio
+        validatingLowCurrent = false;
+        lowCurrentConfirmations = 0;
+        
+        Serial.println("🛑 CONFIRMADO: Forzando PWM a 0 - Sin corriente de paneles detectada");
+        notaPersonalizada = "PWM=0: Sin corriente de paneles (5 confirmaciones)";
+      }
+    }
+  }
+}
+
+
+
 void setup() {
   Serial.begin(9600);
   delay(1000);
@@ -614,16 +708,16 @@ void setup() {
   Wire.begin(SDA_PIN, SCL_PIN);
 
  // Inicializar sensor de paneles (0x40) SIN bloquear
-if (ina219_1.begin()) {
-  ina219_1.setCalibration_32V_2A();
-  ina219_1_available = true;
-  Serial.println("✅ Sensor INA219 paneles (0x40) inicializado");
-} else {
-  ina219_1_available = false;
-  Serial.println("⚠️ Sensor INA219 paneles (0x40) no encontrado");
-  Serial.println("   Sistema continuará sin lectura de paneles");
-  notaPersonalizada = "Sin sensor de paneles - corriente = 0";
-}
+  if (ina219_1.begin()) {
+    ina219_1.setCalibration_32V_2A();
+    ina219_1_available = true;
+    Serial.println("✅ Sensor INA219 paneles (0x40) inicializado");
+  } else {
+    ina219_1_available = false;
+    Serial.println("⚠️ Sensor INA219 paneles (0x40) no encontrado");
+    Serial.println("   Sistema continuará sin lectura de paneles");
+    notaPersonalizada = "Sin sensor de paneles - corriente = 0";
+  }
 
 
   if (!ina219_2.begin()) {
@@ -643,7 +737,7 @@ if (ina219_1.begin()) {
   }
 
   // Iniciar PWM en cero
-  setPWM(10);
+  setPWM(0);
   currentState = BULK_CHARGE;
 
   // Añadir detección inicial del estado de la batería
@@ -1094,10 +1188,8 @@ void executeMainLoopTasks() {
   Serial.print("Voltaje etapa BULK: ");
   Serial.println(bulkVoltage);
 
-  if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
-    //currentPWM = 0;
-    Serial.println("Desabilitado:Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
-  }
+  // Validación robusta de corriente baja con confirmaciones múltiples
+  validateLowCurrentAndControlPWM(panelToBatteryCurrent);
 
   // Control de voltaje (LVD y LVR)
   if (!temporaryLoadOff) {
@@ -1109,12 +1201,28 @@ void executeMainLoopTasks() {
       Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
     }
   } else {
-    // Si hay un apagado temporal activo, verificar si debe terminar
-    if (millis() - loadOffStartTime >= loadOffDuration) {
+    // ✅ NUEVA VERIFICACIÓN: Control de tiempo máximo durante apagado temporal
+    unsigned long currentOffTime = millis() - loadOffStartTime;
+    
+    // Si ya pasó el tiempo O si excede el límite máximo por seguridad
+    if (currentOffTime >= loadOffDuration || currentOffTime >= MAX_LOAD_OFF_DURATION) {
       temporaryLoadOff = false;
-      digitalWrite(LOAD_CONTROL_PIN, HIGH);
-      notaPersonalizada = "Apagado temporal completado, carga reactivada";
-      Serial.println("⏰ Apagado temporal completado, carga reactivada");
+      
+      // Verificar voltaje antes de reactivar
+      if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
+        digitalWrite(LOAD_CONTROL_PIN, HIGH);
+        
+        if (currentOffTime >= MAX_LOAD_OFF_DURATION) {
+          notaPersonalizada = "Apagado finalizado por límite de seguridad (8h)";
+          Serial.println("🛡️ Apagado temporal finalizado por límite de seguridad");
+        } else {
+          notaPersonalizada = "Apagado temporal completado, carga reactivada";
+          Serial.println("⏰ Apagado temporal completado, carga reactivada");
+        }
+      } else {
+        notaPersonalizada = "Apagado completado pero voltaje insuficiente para reactivar";
+        Serial.println("⚠️ Apagado temporal completado pero voltaje insuficiente");
+      }
     }
   }
 

@@ -22,7 +22,7 @@
 #define ADC_RESOLUTION 4095.0
 #define VCC 3.3
 #define NUM_SAMPLES 20
-#define TEMP_THRESHOLD_SHUTDOWN 70
+#define TEMP_THRESHOLD_SHUTDOWN 90
 
 // Estados de carga
 enum ChargeState {
