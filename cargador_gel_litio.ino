@@ -93,7 +93,7 @@ ChargeState currentState = BULK_CHARGE;
 static int lowCurrentConfirmations = 0;
 static unsigned long lastLowCurrentCheck = 0;
 static bool validatingLowCurrent = false;
-const int REQUIRED_CONFIRMATIONS = 5;
+const int REQUIRED_CONFIRMATIONS = 10;
 const unsigned long CONFIRMATION_INTERVAL = 100; // 100ms entre confirmaciones
 
 // Variable global de PWM (0-255 antes de invertir)
@@ -1187,7 +1187,7 @@ void executeMainLoopTasks() {
 
   Serial.print("Voltaje etapa BULK: ");
   Serial.println(bulkVoltage);
-
+  
   // Validación robusta de corriente baja con confirmaciones múltiples
   validateLowCurrentAndControlPWM(panelToBatteryCurrent);
 
