@@ -428,7 +428,27 @@ void handleSetCommand(String cmd) {
       success = true;
     }
   }
+  else if (parameter == "currentPWM") {
+    int pwmValue = (int)value;
+    if (pwmValue >= 0 && pwmValue <= 255) {
+      Serial.println("🧪 [TESTING] Control directo de PWM: " + String(pwmValue));
+      currentPWM = pwmValue;
+      setPWM(currentPWM);
+      success = true;
+      notaPersonalizada = "PWM manual: " + String(pwmValue);
+    }
+  }
   
+  else if (parameter == "pwmPercentage") {
+    if (value >= 0.0 && value <= 100.0) {
+      int pwmValue = (int)((value / 100.0) * 255.0);
+      Serial.println("🧪 [TESTING] PWM: " + String(value) + "% = " + String(pwmValue));
+      currentPWM = pwmValue;
+      setPWM(currentPWM);
+      success = true;
+      notaPersonalizada = "PWM: " + String(value) + "%";
+    }
+  }
   else if (parameter == "factorDivider") {
     if (value >= 1 && value <= 10) {
       factorDivider = (int)value;
