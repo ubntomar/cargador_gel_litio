@@ -32,6 +32,7 @@ Preferences preferences;
 bool useFuenteDC = false;
 float fuenteDC_Amps = 0.0;
 float maxBulkHours = 0.0;
+float currentBulkHours = 0.0;
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);
@@ -93,8 +94,8 @@ ChargeState currentState = BULK_CHARGE;
 static int lowCurrentConfirmations = 0;
 static unsigned long lastLowCurrentCheck = 0;
 static bool validatingLowCurrent = false;
-const int REQUIRED_CONFIRMATIONS = 10;
-const unsigned long CONFIRMATION_INTERVAL = 100; // 100ms entre confirmaciones
+const int REQUIRED_CONFIRMATIONS = 5;
+const unsigned long CONFIRMATION_INTERVAL = 50; // 100ms entre confirmaciones
 
 // Variable global de PWM (0-255 antes de invertir)
 int currentPWM = 0;
@@ -259,6 +260,7 @@ void sendDataToOrangePi() {
   json += "\"useFuenteDC\":" + String(useFuenteDC ? "true" : "false") + ",";
   json += "\"fuenteDC_Amps\":" + String(fuenteDC_Amps) + ",";
   json += "\"maxBulkHours\": " + String(maxBulkHours) + ",";
+  json += "\"currentBulkHours\":" + String(currentBulkHours) + ",";
   json += "\"panelSensorAvailable\": ";
   json += ina219_1_available ? "true" : "false";
   json += ","; 
@@ -975,7 +977,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       // Verificar si debemos salir de BULK por tiempo (solo con fuente DC)
       else if (useFuenteDC && fuenteDC_Amps > 0 && maxBulkHours > 0) {
         // Corregido: asegurar que el cálculo se realiza correctamente como float
-        float currentBulkHours = (float)(millis() - bulkStartTime) / 3600000.0f;
+        currentBulkHours = (float)(millis() - bulkStartTime) / 3600000.0f;
         
         // Actualizar nota con tiempo transcurrido
         notaPersonalizada = "Bulk: " + String(currentBulkHours, 1) + "h de " + String(maxBulkHours, 1) + "h máx";
@@ -1033,6 +1035,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
           Serial.println("-> Transición a ABSORPTION_CHARGE");
         }
       }
+      currentBulkHours = 0.0; // Reset porque ya no estamos en BULK
       break;
 
     case FLOAT_CHARGE:
@@ -1049,6 +1052,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         currentState = ABSORPTION_CHARGE;
         Serial.println("-> Transición a ABSORPTION_CHARGE");
       }
+      currentBulkHours = 0.0; // Reset porque ya no estamos en BULK
       break;
 
     case ERROR:
