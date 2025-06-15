@@ -330,6 +330,9 @@ void sendDataToOrangePi() {
 
 
 
+// CORRECCIÓN para handleSetCommand en cargador_gel_litio.ino
+// Reemplazar la función completa handleSetCommand con esta versión mejorada
+
 void handleSetCommand(String cmd) {
   int colonIndex = cmd.indexOf(':');
   if (colonIndex == -1) {
@@ -343,6 +346,7 @@ void handleSetCommand(String cmd) {
   
   bool success = false;
   String response = "OK:";
+  String debugInfo = "";
   
   Serial.println("🔧 [Orange Pi] Procesando SET " + parameter + " = " + valueStr);
   
@@ -389,47 +393,81 @@ void handleSetCommand(String cmd) {
     }
   }
   
-  // === PARÁMETROS DE TIPO BOOLEAN ===
+  // === PARÁMETROS BOOLEAN CON VALIDACIÓN MEJORADA ===
   else if (parameter == "isLithium") {
-    isLithium = (valueStr == "true" || valueStr == "1");
+    // Manejo robusto de valores booleanos
+    bool newValue = false;
+    if (valueStr == "true" || valueStr == "1" || valueStr == "True" || valueStr == "TRUE") {
+      newValue = true;
+    } else if (valueStr == "false" || valueStr == "0" || valueStr == "False" || valueStr == "FALSE") {
+      newValue = false;
+    } else {
+      OrangePiSerial.println("ERROR:Invalid boolean value for isLithium: " + valueStr);
+      Serial.println("❌ [Orange Pi] Valor boolean inválido para isLithium: " + valueStr);
+      return;
+    }
+    
+    isLithium = newValue;
     success = true;
-    Serial.println("🔋 [Orange Pi] Tipo de batería cambiado a: " + String(isLithium ? "Litio" : "GEL"));
+    debugInfo = "Tipo de batería cambiado a: " + String(isLithium ? "Litio" : "GEL");
+    Serial.println("🔋 [Orange Pi] " + debugInfo);
   }
+  
+  // ✅ CORRECCIÓN PRINCIPAL: useFuenteDC con validación mejorada
   else if (parameter == "useFuenteDC") {
-    useFuenteDC = (valueStr == "true" || valueStr == "1");
+    bool oldValue = useFuenteDC;
+    bool newValue = false;
+    
+    // Validación robusta del valor boolean
+    if (valueStr == "true" || valueStr == "1" || valueStr == "True" || valueStr == "TRUE") {
+      newValue = true;
+    } else if (valueStr == "false" || valueStr == "0" || valueStr == "False" || valueStr == "FALSE") {
+      newValue = false;
+    } else {
+      OrangePiSerial.println("ERROR:Invalid boolean value for useFuenteDC: " + valueStr);
+      Serial.println("❌ [Orange Pi] Valor boolean inválido para useFuenteDC: " + valueStr);
+      return;
+    }
+    
+    useFuenteDC = newValue;
     success = true;
-    Serial.println("⚡ [Orange Pi] Fuente de energía cambiada a: " + String(useFuenteDC ? "DC" : "Solar"));
+    
+    debugInfo = "Fuente de energía cambiada: " + String(oldValue ? "DC" : "Solar") + " → " + String(useFuenteDC ? "DC" : "Solar");
+    Serial.println("⚡ [Orange Pi] " + debugInfo);
+    
+    // Recalcular parámetros dependientes inmediatamente
+    if (useFuenteDC && fuenteDC_Amps > 0) {
+      maxBulkHours = batteryCapacity / fuenteDC_Amps;
+      notaPersonalizada = "Fuente DC activada - Tiempo máx. Bulk: " + String(maxBulkHours, 1) + "h";
+      Serial.println("📊 [Orange Pi] maxBulkHours recalculado: " + String(maxBulkHours, 1) + " horas");
+    } else {
+      maxBulkHours = 0.0;
+      notaPersonalizada = "Usando paneles solares";
+      Serial.println("📊 [Orange Pi] Modo paneles solares activado");
+    }
   }
   
   // === PARÁMETROS DE FUENTE DC ===
   else if (parameter == "fuenteDC_Amps") {
     if (value >= 0 && value <= 50) {
+      float oldValue = fuenteDC_Amps;
       fuenteDC_Amps = value;
+      
       // Recalcular horas máximas en Bulk
       if (useFuenteDC && fuenteDC_Amps > 0) {
         maxBulkHours = batteryCapacity / fuenteDC_Amps;
+        debugInfo = "Amperaje DC: " + String(oldValue) + "A → " + String(fuenteDC_Amps) + "A, maxBulkHours: " + String(maxBulkHours, 1) + "h";
       } else {
         maxBulkHours = 0.0;
+        debugInfo = "Amperaje DC configurado: " + String(fuenteDC_Amps) + "A (no activo)";
       }
+      
+      Serial.println("🔋 [Orange Pi] " + debugInfo);
       success = true;
     }
   }
   
-  // === PARÁMETROS AVANZADOS (agregar según necesites) ===
-  else if (parameter == "LVD") {
-    if (value >= 10.0 && value <= 13.0) {
-      // Si tienes LVD como variable, descomenta:
-      // LVD = value;
-      success = true;
-    }
-  }
-  else if (parameter == "LVR") {
-    if (value >= 11.0 && value <= 14.0) {
-      // Si tienes LVR como variable, descomenta:
-      // LVR = value;
-      success = true;
-    }
-  }
+  // === PARÁMETROS AVANZADOS ===
   else if (parameter == "currentPWM") {
     int pwmValue = (int)value;
     if (pwmValue >= 0 && pwmValue <= 255) {
@@ -451,6 +489,7 @@ void handleSetCommand(String cmd) {
       notaPersonalizada = "PWM: " + String(value) + "%";
     }
   }
+  
   else if (parameter == "factorDivider") {
     if (value >= 1 && value <= 10) {
       factorDivider = (int)value;
@@ -467,26 +506,83 @@ void handleSetCommand(String cmd) {
   
   // === GUARDAR EN PREFERENCES SI FUE EXITOSO ===
   if (success) {
-    preferences.begin("charger", false);
+    bool preferencesSuccess = false;
     
-    // Guardar según el parámetro
-    if (parameter == "batteryCapacity") preferences.putFloat("batteryCap", batteryCapacity);
-    else if (parameter == "thresholdPercentage") preferences.putFloat("thresholdPerc", thresholdPercentage);
-    else if (parameter == "maxAllowedCurrent") preferences.putFloat("maxCurrent", maxAllowedCurrent);
-    else if (parameter == "bulkVoltage") preferences.putFloat("bulkV", bulkVoltage);
-    else if (parameter == "absorptionVoltage") preferences.putFloat("absV", absorptionVoltage);
-    else if (parameter == "floatVoltage") preferences.putFloat("floatV", floatVoltage);
-    else if (parameter == "isLithium") preferences.putBool("isLithium", isLithium);
-    else if (parameter == "useFuenteDC") preferences.putBool("useFuenteDC", useFuenteDC);
-    else if (parameter == "fuenteDC_Amps") preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
+    // ✅ MEJORADO: Intentar abrir Preferences con manejo de errores
+    if (preferences.begin("charger", false)) {
+      
+      // Guardar según el parámetro con verificación
+      if (parameter == "batteryCapacity") {
+        preferences.putFloat("batteryCap", batteryCapacity);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "thresholdPercentage") {
+        preferences.putFloat("thresholdPerc", thresholdPercentage);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "maxAllowedCurrent") {
+        preferences.putFloat("maxCurrent", maxAllowedCurrent);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "bulkVoltage") {
+        preferences.putFloat("bulkV", bulkVoltage);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "absorptionVoltage") {
+        preferences.putFloat("absV", absorptionVoltage);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "floatVoltage") {
+        preferences.putFloat("floatV", floatVoltage);
+        preferencesSuccess = true;
+      }
+      else if (parameter == "isLithium") {
+        preferences.putBool("isLithium", isLithium);
+        preferencesSuccess = true;
+        Serial.println("💾 [Orange Pi] isLithium guardado: " + String(isLithium ? "true" : "false"));
+      }
+      // ✅ CORRECCIÓN CRÍTICA: Guardar useFuenteDC con verificación
+      else if (parameter == "useFuenteDC") {
+        preferences.putBool("useFuenteDC", useFuenteDC);
+        preferencesSuccess = true;
+        Serial.println("💾 [Orange Pi] useFuenteDC guardado: " + String(useFuenteDC ? "true" : "false"));
+        
+        // ✅ NUEVO: Verificar inmediatamente que se guardó correctamente
+        bool verificacion = preferences.getBool("useFuenteDC", false);
+        if (verificacion == useFuenteDC) {
+          Serial.println("✅ [Orange Pi] Verificación exitosa: useFuenteDC = " + String(verificacion ? "true" : "false"));
+        } else {
+          Serial.println("❌ [Orange Pi] ERROR: Verificación falló. Esperado: " + String(useFuenteDC ? "true" : "false") + ", Leído: " + String(verificacion ? "true" : "false"));
+        }
+      }
+      else if (parameter == "fuenteDC_Amps") {
+        preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
+        preferencesSuccess = true;
+        Serial.println("💾 [Orange Pi] fuenteDC_Amps guardado: " + String(fuenteDC_Amps));
+      }
+      
+      preferences.end();
+      
+      if (preferencesSuccess) {
+        response += parameter + " updated to " + valueStr;
+        if (!debugInfo.isEmpty()) {
+          response += " (" + debugInfo + ")";
+        }
+        notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
+        
+        Serial.println("✅ [Orange Pi] " + response);
+        Serial.println("💾 [Orange Pi] Parámetro guardado exitosamente en Preferences");
+      } else {
+        response = "ERROR:Parameter processed but not saved to preferences: " + parameter;
+        Serial.println("❌ [Orange Pi] Parámetro procesado pero no guardado en Preferences: " + parameter);
+      }
+      
+    } else {
+      // Error abriendo Preferences
+      response = "ERROR:Could not open preferences for parameter: " + parameter;
+      Serial.println("❌ [Orange Pi] No se pudo abrir Preferences para: " + parameter);
+    }
     
-    preferences.end();
-    
-    response += parameter + " updated to " + valueStr;
-    notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
-    
-    Serial.println("✅ [Orange Pi] " + response);
-    Serial.println("💾 [Orange Pi] Parámetro guardado en Preferences");
   } else {
     response = "ERROR:Invalid value for " + parameter + " (received: " + valueStr + ")";
     Serial.println("❌ [Orange Pi] " + response);
@@ -494,6 +590,9 @@ void handleSetCommand(String cmd) {
   
   // Enviar respuesta a Orange Pi
   OrangePiSerial.println(response);
+  
+  // ✅ NUEVO: Log adicional para debugging
+  Serial.println("📤 [Orange Pi] Respuesta enviada: " + response);
 }
 
 
