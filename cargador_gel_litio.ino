@@ -45,7 +45,7 @@ const int pwmResolution = 8;
 
 // Configuración de lecturas
 const int numSamples = 20;
-float maxAllowedCurrent = 6000.0;
+float maxAllowedCurrent = 6500.0;
 
 //Máximo voltaje de batería
 const float maxBatteryVoltageAllowed = 15.0;
@@ -146,6 +146,23 @@ void floatControl(float batteryVoltage, float floatVoltage);
 void adjustPWM(int step);
 void setPWM(int pwmValue);
 String getChargeStateString(ChargeState state);
+
+
+
+void configureINA219ForPanel() {
+  /**
+   * Calibración personalizada para shunt 10mΩ y rango 0-6A
+   * Current_LSB = 0.3mA (permite medir hasta ~6.5A con buena resolución)
+   * Calibration = 0.04096 / (Current_LSB * R_shunt)
+   * Cal = 0.04096 / (0.0003 * 0.01) = 13653
+   */
+  
+  // Escribir calibración directamente al registro
+  ina219_1.wireWriteRegister(0x05, 13653);  // Registro de calibración
+  
+  Serial.println("📐 INA219 Panel configurado para shunt 10mΩ - Rango: 0-6A");
+  Serial.println("   Resolución: ~0.3mA por bit");
+}
 
 
 // ========== FUNCIONES PROTOCOLO SERIAL ==========
@@ -690,10 +707,10 @@ void checkPanelSensorAvailability() {
     if (!ina219_1_available) {
       // Intentar reconectar sensor de paneles
       if (ina219_1.begin()) {
-        ina219_1.setCalibration_32V_2A();
+        configureINA219ForPanel();  // ✅ Calibración personalizada para shunt 10mΩ
         ina219_1_available = true;
-        Serial.println("🔄 Sensor de paneles reconectado automáticamente");
-        notaPersonalizada = "Sensor de paneles reconectado";
+        Serial.println("🔄 Sensor de paneles reconectado automáticamente - Shunt 10mΩ");
+        notaPersonalizada = "Sensor de paneles reconectado con calibración correcta";
       }
     }
   }
@@ -709,7 +726,7 @@ float getPanelCurrent() {
   int validSamples = 0;
   
   for (int i = 0; i < numSamples; i++) {
-    float current_mA = ina219_1.getCurrent_mA() * 10; // shunt 10 mΩ
+    float current_mA = ina219_1.getCurrent_mA() * 5.0; // shunt 10 mΩ
     if (current_mA >= 0 && current_mA <= maxAllowedCurrent) {
       totalCurrent += current_mA;
       validSamples++;
@@ -830,14 +847,12 @@ void setup() {
 
  // Inicializar sensor de paneles (0x40) SIN bloquear
   if (ina219_1.begin()) {
-    ina219_1.setCalibration_32V_2A();
-    ina219_1_available = true;
-    Serial.println("✅ Sensor INA219 paneles (0x40) inicializado");
+  configureINA219ForPanel();  // Usar calibración personalizada
+  ina219_1_available = true;
+  Serial.println("✅ Sensor INA219 paneles (0x40) inicializado - Shunt 10mΩ");
   } else {
     ina219_1_available = false;
     Serial.println("⚠️ Sensor INA219 paneles (0x40) no encontrado");
-    Serial.println("   Sistema continuará sin lectura de paneles");
-    notaPersonalizada = "Sin sensor de paneles - corriente = 0";
   }
 
 
