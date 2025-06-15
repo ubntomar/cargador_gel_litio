@@ -157,8 +157,14 @@ void configureINA219ForPanel() {
    * Cal = 0.04096 / (0.0003 * 0.01) = 13653
    */
   
-  // Escribir calibración directamente al registro
-  ina219_1.wireWriteRegister(0x05, 13653);  // Registro de calibración
+  // Escribir calibración directamente usando Wire.h
+  Wire.beginTransmission(0x40);  // Dirección del INA219 paneles
+  Wire.write(0x05);              // Registro de calibración
+  Wire.write((13653 >> 8) & 0xFF);  // Byte alto
+  Wire.write(13653 & 0xFF);         // Byte bajo
+  Wire.endTransmission();
+  
+  delay(10);  // Pequeña pausa para que el registro se actualice
   
   Serial.println("📐 INA219 Panel configurado para shunt 10mΩ - Rango: 0-6A");
   Serial.println("   Resolución: ~0.3mA por bit");
@@ -726,7 +732,7 @@ float getPanelCurrent() {
   int validSamples = 0;
   
   for (int i = 0; i < numSamples; i++) {
-    float current_mA = ina219_1.getCurrent_mA() * 5.0; // shunt 10 mΩ
+    float current_mA = ina219_1.getCurrent_mA() * 3.33; // shunt 10 mΩ
     if (current_mA >= 0 && current_mA <= maxAllowedCurrent) {
       totalCurrent += current_mA;
       validSamples++;
@@ -741,7 +747,8 @@ float getPanelCurrent() {
   }
   
   if (validSamples == 0) return 0.0;
-  return totalCurrent / validSamples;
+  int manualCalibratioMultiplier= 3.1; // Factor de calibración manual para shunt 10 mΩ
+  return (totalCurrent / validSamples) * manualCalibratioMultiplier; 
 }
 
 // Función para leer voltaje de paneles con manejo de errores
