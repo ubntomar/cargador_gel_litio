@@ -46,6 +46,7 @@ const int pwmResolution = 8;
 // Configuración de lecturas
 const int numSamples = 20;
 float maxAllowedCurrent = 6500.0;
+float manualCalibratioMultiplier= 2.99; // Multiplicador de calibración manual para shunt 10 mΩ
 
 //Máximo voltaje de batería
 const float maxBatteryVoltageAllowed = 15.0;
@@ -747,7 +748,7 @@ float getPanelCurrent() {
   }
   
   if (validSamples == 0) return 0.0;
-  int manualCalibratioMultiplier= 3.1; // Factor de calibración manual para shunt 10 mΩ
+  
   return (totalCurrent / validSamples) * manualCalibratioMultiplier; 
 }
 
