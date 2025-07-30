@@ -8,11 +8,7 @@
 #include "web_server.h"    // Incluir el archivo del servidor web
 
 
-// Límite máximo de apagado (8 horas = 28800 segundos)
-const unsigned long MAX_LOAD_OFF_DURATION = 28800000UL; // 8 horas en milisegundos
-const unsigned long MAX_LOAD_OFF_SECONDS = 28800UL;     // 8 horas en segundos
-
-// ========== PROTOCOLO SERIAL ORANGE PI ===========
+// ========== PROTOCOLO SERIAL ORANGE PI ==========
 // Definir pines para UART0 (comunicación con Orange Pi)
 #define RX_PIN_SERIAL 20  // GPIO20 - Pin RX físico
 #define TX_PIN_SERIAL 21  // GPIO21 - Pin TX físico
@@ -32,7 +28,6 @@ Preferences preferences;
 bool useFuenteDC = false;
 float fuenteDC_Amps = 0.0;
 float maxBulkHours = 0.0;
-float currentBulkHours = 0.0;
 
 // Sensores INA219
 Adafruit_INA219 ina219_1(0x40);
@@ -45,8 +40,7 @@ const int pwmResolution = 8;
 
 // Configuración de lecturas
 const int numSamples = 20;
-float maxAllowedCurrent = 6500.0;
-float manualCalibratioMultiplier= 2.99; // Multiplicador de calibración manual para shunt 10 mΩ
+float maxAllowedCurrent = 6000.0;
 
 //Máximo voltaje de batería
 const float maxBatteryVoltageAllowed = 15.0;
@@ -54,16 +48,14 @@ const float maxBatteryVoltageAllowed = 15.0;
 // Variable compartida para la nota personalizada
 String notaPersonalizada = "";
 
-// Estado del sensor de paneles
-bool ina219_1_available = false;
-unsigned long lastPanelSensorCheck = 0;
-const unsigned long PANEL_SENSOR_CHECK_INTERVAL = 60000; // ms segundos
-
 
 // Parámetros de carga para baterías de gel
 float bulkVoltage = 14.4;
 float absorptionVoltage = 14.4;
 float floatVoltage = 13.6;
+
+float currentBulkHours = 0.0;
+bool panelSensorAvailable = true; // Asumimos que el sensor de panel está disponible
 
 float absorptionCurrentThreshold_mA = 350.0;
 float currentLimitIntoFloatStage = 100.0;
@@ -91,23 +83,12 @@ unsigned long bulkStartTime = 0;
 
 ChargeState currentState = BULK_CHARGE;
 
-// Variables para validación de corriente baja (no bloqueante)
-static int lowCurrentConfirmations = 0;
-static unsigned long lastLowCurrentCheck = 0;
-static bool validatingLowCurrent = false;
-const int REQUIRED_CONFIRMATIONS = 5;
-const unsigned long CONFIRMATION_INTERVAL = 50; // 100ms entre confirmaciones
-
 // Variable global de PWM (0-255 antes de invertir)
 int currentPWM = 0;
 
 // Almacenar corrientes generadas
 float panelToBatteryCurrent = 0;
 float batteryToLoadCurrent = 0;
-
-// ========== VARIABLES PARA TIMING NO BLOQUEANTE ==========
-unsigned long previousMainLoopTime = 0;
-const unsigned long MAIN_LOOP_INTERVAL = 1000; // 1 segundo en milisegundos
 
 // Parámetros de control de voltaje ya están en config.h
 // const float LVD = 12.0;
@@ -149,31 +130,9 @@ void setPWM(int pwmValue);
 String getChargeStateString(ChargeState state);
 
 
-
-void configureINA219ForPanel() {
-  /**
-   * Calibración personalizada para shunt 10mΩ y rango 0-6A
-   * Current_LSB = 0.3mA (permite medir hasta ~6.5A con buena resolución)
-   * Calibration = 0.04096 / (Current_LSB * R_shunt)
-   * Cal = 0.04096 / (0.0003 * 0.01) = 13653
-   */
-  
-  // Escribir calibración directamente usando Wire.h
-  Wire.beginTransmission(0x40);  // Dirección del INA219 paneles
-  Wire.write(0x05);              // Registro de calibración
-  Wire.write((13653 >> 8) & 0xFF);  // Byte alto
-  Wire.write(13653 & 0xFF);         // Byte bajo
-  Wire.endTransmission();
-  
-  delay(10);  // Pequeña pausa para que el registro se actualice
-  
-  Serial.println("📐 INA219 Panel configurado para shunt 10mΩ - Rango: 0-6A");
-  Serial.println("   Resolución: ~0.3mA por bit");
-}
-
-
 // ========== FUNCIONES PROTOCOLO SERIAL ==========
 void initSerialCommunication() {
+  OrangePiSerial.setTxBufferSize(2048);
   OrangePiSerial.begin(9600, SERIAL_8N1, RX_PIN_SERIAL, TX_PIN_SERIAL);
   Serial.println("📡 Comunicación serial con Orange Pi inicializada");
   Serial.printf("  RX: GPIO%d, TX: GPIO%d\n", RX_PIN_SERIAL, TX_PIN_SERIAL);
@@ -246,7 +205,7 @@ void sendDataToOrangePi() {
   Serial.println("📤 [Orange Pi] Preparando envío de datos completos...");
   
   // Crear JSON con TODOS los datos del sistema
-  String json = "DATA:{";
+  String json = "{";
   
   // === MEDICIONES EN TIEMPO REAL ===
   json += "\"panelToBatteryCurrent\":" + String(panelToBatteryCurrent) + ",";
@@ -279,15 +238,12 @@ void sendDataToOrangePi() {
   json += "\"estimatedSOC\":" + String(getSOCFromVoltage(ina219_2.getBusVoltage_V())) + ",";
   json += "\"netCurrent\":" + String(panelToBatteryCurrent - batteryToLoadCurrent) + ",";
   json += "\"factorDivider\":" + String(factorDivider) + ",";
-  
+  json += "\"currentBulkHours\":" + String(currentBulkHours) + ",";
+  json += "\"panelSensorAvailable\":" + String(panelSensorAvailable ? "true" : "false") + ",";
   // === CONFIGURACIÓN DE FUENTE ===
   json += "\"useFuenteDC\":" + String(useFuenteDC ? "true" : "false") + ",";
   json += "\"fuenteDC_Amps\":" + String(fuenteDC_Amps) + ",";
-  json += "\"maxBulkHours\": " + String(maxBulkHours) + ",";
-  json += "\"currentBulkHours\":" + String(currentBulkHours) + ",";
-  json += "\"panelSensorAvailable\": ";
-  json += ina219_1_available ? "true" : "false";
-  json += ","; 
+  json += "\"maxBulkHours\":" + String(maxBulkHours) + ",";
   
   // === CONFIGURACIÓN AVANZADA ===
   json += "\"maxAbsorptionHours\":" + String(maxAbsorptionHours) + ",";
@@ -301,27 +257,20 @@ void sendDataToOrangePi() {
   if (temporaryLoadOff) {
     unsigned long remainingTime = 0;
     unsigned long elapsed = millis() - loadOffStartTime;
-    
-    // ✅ NUEVA LÓGICA: Considerar tanto duración programada como límite máximo
-    unsigned long effectiveDuration = min(loadOffDuration, MAX_LOAD_OFF_DURATION);
-    
-    if (elapsed < effectiveDuration) {
-      remainingTime = (effectiveDuration - elapsed) / 1000; // Convertir a segundos
+    if (elapsed < loadOffDuration) {
+      remainingTime = (loadOffDuration - elapsed) / 1000; // Convertir a segundos
     }
-    
     json += "\"loadOffRemainingSeconds\":" + String(remainingTime) + ",";
-    json += "\"loadOffDuration\":" + String(effectiveDuration / 1000) + ",";
-    json += "\"loadOffMaxDuration\":" + String(MAX_LOAD_OFF_SECONDS) + ",";  // NUEVO campo
+    json += "\"loadOffDuration\":" + String(loadOffDuration / 1000) + ",";
   } else {
     json += "\"loadOffRemainingSeconds\":0,";
     json += "\"loadOffDuration\":0,";
-    json += "\"loadOffMaxDuration\":" + String(MAX_LOAD_OFF_SECONDS) + ",";  // NUEVO campo
   }
   
   // === ESTADO DEL SISTEMA ===
   json += "\"loadControlState\":" + String(digitalRead(LOAD_CONTROL_PIN) ? "true" : "false") + ",";
   json += "\"ledSolarState\":" + String(digitalRead(LED_SOLAR) ? "true" : "false") + ",";
-  json += "\"panelSensorAvailable\":" + String(ina219_1_available ? "true" : "false") + ",";
+  
   // Sanitizar nota personalizada para JSON
   String sanitizedNota = notaPersonalizada;
   sanitizedNota.replace("\"", "\\\"");
@@ -336,7 +285,7 @@ void sendDataToOrangePi() {
   json += "\"last_update\":\"" + String(millis()) + "\"";
   
   json += "}";
-  
+  Serial.println("📏 Tamaño JSON: " + String(json.length()) + " caracteres");
   // Verificar tamaño del JSON antes de enviar
   if (json.length() > 2000) {
     Serial.println("⚠️ [Orange Pi] JSON muy largo (" + String(json.length()) + " chars), dividiendo...");
@@ -348,14 +297,11 @@ void sendDataToOrangePi() {
   Serial.println("📤 [Orange Pi] Datos completos enviados: " + String(json.length()) + " caracteres");
   
   // Debug: mostrar primeros 200 caracteres del JSON
-  Serial.println("📋 [Orange Pi] JSON preview: " + json.substring(0, min(200, (int)json.length())) + "...");
+  Serial.println("📋 [Orange Pi] JSON preview: " + json.substring(0, min(1050, (int)json.length())) + "...");
 }
 
 
 
-
-// CORRECCIÓN para handleSetCommand en cargador_gel_litio.ino
-// Reemplazar la función completa handleSetCommand con esta versión mejorada
 
 void handleSetCommand(String cmd) {
   int colonIndex = cmd.indexOf(':');
@@ -370,7 +316,6 @@ void handleSetCommand(String cmd) {
   
   bool success = false;
   String response = "OK:";
-  String debugInfo = "";
   
   Serial.println("🔧 [Orange Pi] Procesando SET " + parameter + " = " + valueStr);
   
@@ -417,100 +362,45 @@ void handleSetCommand(String cmd) {
     }
   }
   
-  // === PARÁMETROS BOOLEAN CON VALIDACIÓN MEJORADA ===
+  // === PARÁMETROS DE TIPO BOOLEAN ===
   else if (parameter == "isLithium") {
-    // Manejo robusto de valores booleanos
-    bool newValue = false;
-    if (valueStr == "true" || valueStr == "1" || valueStr == "True" || valueStr == "TRUE") {
-      newValue = true;
-    } else if (valueStr == "false" || valueStr == "0" || valueStr == "False" || valueStr == "FALSE") {
-      newValue = false;
-    } else {
-      OrangePiSerial.println("ERROR:Invalid boolean value for isLithium: " + valueStr);
-      Serial.println("❌ [Orange Pi] Valor boolean inválido para isLithium: " + valueStr);
-      return;
-    }
-    
-    isLithium = newValue;
+    isLithium = (valueStr == "true" || valueStr == "1");
     success = true;
-    debugInfo = "Tipo de batería cambiado a: " + String(isLithium ? "Litio" : "GEL");
-    Serial.println("🔋 [Orange Pi] " + debugInfo);
+    Serial.println("🔋 [Orange Pi] Tipo de batería cambiado a: " + String(isLithium ? "Litio" : "GEL"));
   }
-  
-  // ✅ CORRECCIÓN PRINCIPAL: useFuenteDC con validación mejorada
   else if (parameter == "useFuenteDC") {
-    bool oldValue = useFuenteDC;
-    bool newValue = false;
-    
-    // Validación robusta del valor boolean
-    if (valueStr == "true" || valueStr == "1" || valueStr == "True" || valueStr == "TRUE") {
-      newValue = true;
-    } else if (valueStr == "false" || valueStr == "0" || valueStr == "False" || valueStr == "FALSE") {
-      newValue = false;
-    } else {
-      OrangePiSerial.println("ERROR:Invalid boolean value for useFuenteDC: " + valueStr);
-      Serial.println("❌ [Orange Pi] Valor boolean inválido para useFuenteDC: " + valueStr);
-      return;
-    }
-    
-    useFuenteDC = newValue;
+    useFuenteDC = (valueStr == "true" || valueStr == "1");
     success = true;
-    
-    debugInfo = "Fuente de energía cambiada: " + String(oldValue ? "DC" : "Solar") + " → " + String(useFuenteDC ? "DC" : "Solar");
-    Serial.println("⚡ [Orange Pi] " + debugInfo);
-    
-    // Recalcular parámetros dependientes inmediatamente
-    if (useFuenteDC && fuenteDC_Amps > 0) {
-      maxBulkHours = batteryCapacity / fuenteDC_Amps;
-      notaPersonalizada = "Fuente DC activada - Tiempo máx. Bulk: " + String(maxBulkHours, 1) + "h";
-      Serial.println("📊 [Orange Pi] maxBulkHours recalculado: " + String(maxBulkHours, 1) + " horas");
-    } else {
-      maxBulkHours = 0.0;
-      notaPersonalizada = "Usando paneles solares";
-      Serial.println("📊 [Orange Pi] Modo paneles solares activado");
-    }
+    Serial.println("⚡ [Orange Pi] Fuente de energía cambiada a: " + String(useFuenteDC ? "DC" : "Solar"));
   }
   
   // === PARÁMETROS DE FUENTE DC ===
   else if (parameter == "fuenteDC_Amps") {
     if (value >= 0 && value <= 50) {
-      float oldValue = fuenteDC_Amps;
       fuenteDC_Amps = value;
-      
       // Recalcular horas máximas en Bulk
       if (useFuenteDC && fuenteDC_Amps > 0) {
         maxBulkHours = batteryCapacity / fuenteDC_Amps;
-        debugInfo = "Amperaje DC: " + String(oldValue) + "A → " + String(fuenteDC_Amps) + "A, maxBulkHours: " + String(maxBulkHours, 1) + "h";
       } else {
         maxBulkHours = 0.0;
-        debugInfo = "Amperaje DC configurado: " + String(fuenteDC_Amps) + "A (no activo)";
       }
-      
-      Serial.println("🔋 [Orange Pi] " + debugInfo);
       success = true;
     }
   }
   
-  // === PARÁMETROS AVANZADOS ===
-  else if (parameter == "currentPWM") {
-    int pwmValue = (int)value;
-    if (pwmValue >= 0 && pwmValue <= 255) {
-      Serial.println("🧪 [TESTING] Control directo de PWM: " + String(pwmValue));
-      currentPWM = pwmValue;
-      setPWM(currentPWM);
+  // === PARÁMETROS AVANZADOS (agregar según necesites) ===
+  else if (parameter == "LVD") {
+    if (value >= 10.0 && value <= 13.0) {
+      // Si tienes LVD como variable, descomenta:
+      // LVD = value;
       success = true;
-      notaPersonalizada = "PWM manual: " + String(pwmValue);
     }
   }
-  
-  else if (parameter == "pwmPercentage") {
-    if (value >= 0.0 && value <= 100.0) {
-      int pwmValue = (int)((value / 100.0) * 255.0);
-      Serial.println("🧪 [TESTING] PWM: " + String(value) + "% = " + String(pwmValue));
-      currentPWM = pwmValue;
-      setPWM(currentPWM);
+  else if (parameter == "LVR") {
+    if (value >= 11.0 && value <= 14.0) {
+      // Si tienes LVR como variable, descomenta:
+      // LVR = value;
       success = true;
-      notaPersonalizada = "PWM: " + String(value) + "%";
     }
   }
   
@@ -530,83 +420,26 @@ void handleSetCommand(String cmd) {
   
   // === GUARDAR EN PREFERENCES SI FUE EXITOSO ===
   if (success) {
-    bool preferencesSuccess = false;
+    preferences.begin("charger", false);
     
-    // ✅ MEJORADO: Intentar abrir Preferences con manejo de errores
-    if (preferences.begin("charger", false)) {
-      
-      // Guardar según el parámetro con verificación
-      if (parameter == "batteryCapacity") {
-        preferences.putFloat("batteryCap", batteryCapacity);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "thresholdPercentage") {
-        preferences.putFloat("thresholdPerc", thresholdPercentage);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "maxAllowedCurrent") {
-        preferences.putFloat("maxCurrent", maxAllowedCurrent);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "bulkVoltage") {
-        preferences.putFloat("bulkV", bulkVoltage);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "absorptionVoltage") {
-        preferences.putFloat("absV", absorptionVoltage);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "floatVoltage") {
-        preferences.putFloat("floatV", floatVoltage);
-        preferencesSuccess = true;
-      }
-      else if (parameter == "isLithium") {
-        preferences.putBool("isLithium", isLithium);
-        preferencesSuccess = true;
-        Serial.println("💾 [Orange Pi] isLithium guardado: " + String(isLithium ? "true" : "false"));
-      }
-      // ✅ CORRECCIÓN CRÍTICA: Guardar useFuenteDC con verificación
-      else if (parameter == "useFuenteDC") {
-        preferences.putBool("useFuenteDC", useFuenteDC);
-        preferencesSuccess = true;
-        Serial.println("💾 [Orange Pi] useFuenteDC guardado: " + String(useFuenteDC ? "true" : "false"));
-        
-        // ✅ NUEVO: Verificar inmediatamente que se guardó correctamente
-        bool verificacion = preferences.getBool("useFuenteDC", false);
-        if (verificacion == useFuenteDC) {
-          Serial.println("✅ [Orange Pi] Verificación exitosa: useFuenteDC = " + String(verificacion ? "true" : "false"));
-        } else {
-          Serial.println("❌ [Orange Pi] ERROR: Verificación falló. Esperado: " + String(useFuenteDC ? "true" : "false") + ", Leído: " + String(verificacion ? "true" : "false"));
-        }
-      }
-      else if (parameter == "fuenteDC_Amps") {
-        preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
-        preferencesSuccess = true;
-        Serial.println("💾 [Orange Pi] fuenteDC_Amps guardado: " + String(fuenteDC_Amps));
-      }
-      
-      preferences.end();
-      
-      if (preferencesSuccess) {
-        response += parameter + " updated to " + valueStr;
-        if (!debugInfo.isEmpty()) {
-          response += " (" + debugInfo + ")";
-        }
-        notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
-        
-        Serial.println("✅ [Orange Pi] " + response);
-        Serial.println("💾 [Orange Pi] Parámetro guardado exitosamente en Preferences");
-      } else {
-        response = "ERROR:Parameter processed but not saved to preferences: " + parameter;
-        Serial.println("❌ [Orange Pi] Parámetro procesado pero no guardado en Preferences: " + parameter);
-      }
-      
-    } else {
-      // Error abriendo Preferences
-      response = "ERROR:Could not open preferences for parameter: " + parameter;
-      Serial.println("❌ [Orange Pi] No se pudo abrir Preferences para: " + parameter);
-    }
+    // Guardar según el parámetro
+    if (parameter == "batteryCapacity") preferences.putFloat("batteryCap", batteryCapacity);
+    else if (parameter == "thresholdPercentage") preferences.putFloat("thresholdPerc", thresholdPercentage);
+    else if (parameter == "maxAllowedCurrent") preferences.putFloat("maxCurrent", maxAllowedCurrent);
+    else if (parameter == "bulkVoltage") preferences.putFloat("bulkV", bulkVoltage);
+    else if (parameter == "absorptionVoltage") preferences.putFloat("absV", absorptionVoltage);
+    else if (parameter == "floatVoltage") preferences.putFloat("floatV", floatVoltage);
+    else if (parameter == "isLithium") preferences.putBool("isLithium", isLithium);
+    else if (parameter == "useFuenteDC") preferences.putBool("useFuenteDC", useFuenteDC);
+    else if (parameter == "fuenteDC_Amps") preferences.putFloat("fuenteDC_Amps", fuenteDC_Amps);
     
+    preferences.end();
+    
+    response += parameter + " updated to " + valueStr;
+    notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
+    
+    Serial.println("✅ [Orange Pi] " + response);
+    Serial.println("💾 [Orange Pi] Parámetro guardado en Preferences");
   } else {
     response = "ERROR:Invalid value for " + parameter + " (received: " + valueStr + ")";
     Serial.println("❌ [Orange Pi] " + response);
@@ -614,31 +447,8 @@ void handleSetCommand(String cmd) {
   
   // Enviar respuesta a Orange Pi
   OrangePiSerial.println(response);
-  
-  // ✅ NUEVO: Log adicional para debugging
-  Serial.println("📤 [Orange Pi] Respuesta enviada: " + response);
 }
 
-
-unsigned long validateLoadOffDuration(unsigned long requestedSeconds) {
-  /**
-   * Validar y limitar duración de apagado a máximo 8 horas
-   * Medida de seguridad crítica
-   */
-  if (requestedSeconds > MAX_LOAD_OFF_SECONDS) {
-    Serial.println("⚠️ ADVERTENCIA: Duración solicitada excede 8 horas");
-    Serial.println("   Limitando a 8 horas por seguridad");
-    notaPersonalizada = "Duración limitada a 8h por seguridad";
-    return MAX_LOAD_OFF_SECONDS;
-  }
-  
-  if (requestedSeconds < 1) {
-    Serial.println("⚠️ ADVERTENCIA: Duración mínima 1 segundo");
-    return 1;
-  }
-  
-  return requestedSeconds;
-}
 
 void handleToggleLoad(String cmd) {
   int colonIndex = cmd.indexOf(':');
@@ -647,47 +457,29 @@ void handleToggleLoad(String cmd) {
     return;
   }
   
-  unsigned long requestedSeconds = cmd.substring(colonIndex + 1).toInt();
+  int seconds = cmd.substring(colonIndex + 1).toInt();
   
-  Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(requestedSeconds) + " segundos");
+  Serial.println("🔌 [Orange Pi] Solicitud de apagado temporal: " + String(seconds) + " segundos");
   
-  // ✅ NUEVA VALIDACIÓN: Aplicar límite de 8 horas
-  unsigned long validatedSeconds = validateLoadOffDuration(requestedSeconds);
-  
-  if (validatedSeconds != requestedSeconds) {
-    Serial.println("🛡️ Duración ajustada por seguridad: " + String(requestedSeconds) + "s → " + String(validatedSeconds) + "s");
-  }
-  
-  if (validatedSeconds >= 1 && validatedSeconds <= MAX_LOAD_OFF_SECONDS) {
-    // ✅ SOLUCIÓN: Verificar estado solo para decidir si apagar el pin
-    bool wasOn = (digitalRead(LOAD_CONTROL_PIN) == HIGH);
-    
-    // Apagar pin solo si estaba encendido
-    if (wasOn) {
+  // CAMBIO: Aumentar límite a 43200 segundos (12 horas)
+  if (seconds >= 1 && seconds <= 43200) {
+    if (digitalRead(LOAD_CONTROL_PIN) == HIGH) {
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-    }
-    
-    // ✅ SIEMPRE actualizar timers (estuviera ON o ya OFF)
-    temporaryLoadOff = true;
-    loadOffStartTime = millis();
-    loadOffDuration = validatedSeconds * 1000UL;  // Usar duración validada
-    
-    // Mensaje más descriptivo
-    if (wasOn) {
-      notaPersonalizada = "Carga apagada por " + String(validatedSeconds) + " segundos (Orange Pi)";
-      Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(validatedSeconds) + " segundos");
+      temporaryLoadOff = true;
+      loadOffStartTime = millis();
+      loadOffDuration = seconds * 1000UL; // UL para evitar overflow
+      
+      notaPersonalizada = "Carga apagada por " + String(seconds) + " segundos (Orange Pi)";
+      OrangePiSerial.println("OK:Load turned off for " + String(seconds) + " seconds");
+      Serial.println("🔌 [Orange Pi] ✅ Carga apagada por " + String(seconds) + " segundos");
     } else {
-      notaPersonalizada = "Timer apagado actualizado a " + String(validatedSeconds) + " segundos (Orange Pi)";
-      Serial.println("🔌 [Orange Pi] ✅ Timer actualizado a " + String(validatedSeconds) + " segundos (carga ya estaba OFF)");
+      OrangePiSerial.println("OK:Load already off");
+      Serial.println("⚠️ [Orange Pi] La carga ya estaba apagada");
     }
-    
-    // ✅ RESPUESTA CON DURACIÓN VALIDADA
-    OrangePiSerial.println("OK:Load turned off for " + String(validatedSeconds) + " seconds");
-    
   } else {
-    String errorMsg = "ERROR:Invalid time range (1-" + String(MAX_LOAD_OFF_SECONDS) + " seconds), received: " + String(requestedSeconds);
+    String errorMsg = "ERROR:Invalid time range (1-43200 seconds), received: " + String(seconds);
     OrangePiSerial.println(errorMsg);
-    Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(requestedSeconds) + " segundos");
+    Serial.println("❌ [Orange Pi] Tiempo fuera de rango: " + String(seconds) + " segundos");
   }
 }
 
@@ -706,125 +498,12 @@ void periodicSerialUpdate() {
 }
 
 
-// Función para verificar disponibilidad del sensor de paneles
-void checkPanelSensorAvailability() {
-  if (millis() - lastPanelSensorCheck > PANEL_SENSOR_CHECK_INTERVAL) {
-    lastPanelSensorCheck = millis();
-    
-    if (!ina219_1_available) {
-      // Intentar reconectar sensor de paneles
-      if (ina219_1.begin()) {
-        configureINA219ForPanel();  // ✅ Calibración personalizada para shunt 10mΩ
-        ina219_1_available = true;
-        Serial.println("🔄 Sensor de paneles reconectado automáticamente - Shunt 10mΩ");
-        notaPersonalizada = "Sensor de paneles reconectado con calibración correcta";
-      }
-    }
-  }
-}
-
-// Función para leer corriente de paneles con manejo de errores
-float getPanelCurrent() {
-  // if (!ina219_1_available) {
-  //   return 0.0; // Sin sensor = sin corriente de paneles
-  // }
-  
-  float totalCurrent = 0;
-  int validSamples = 0;
-  
-  for (int i = 0; i < numSamples; i++) {
-    float current_mA = ina219_1.getCurrent_mA() * 3.33; // shunt 10 mΩ
-    if (current_mA >= 0 && current_mA <= maxAllowedCurrent) {
-      totalCurrent += current_mA;
-      validSamples++;
-    } else {
-      // // Error de comunicación - marcar como no disponible
-      // ina219_1_available = false;
-      // Serial.println("❌ Sensor de paneles perdió comunicación");
-      // notaPersonalizada = "Sensor de paneles desconectado";
-      // return 0.0;
-    }
-    delay(10);
-  }
-  
-  if (validSamples == 0) return 0.0;
-  
-  return (totalCurrent / validSamples) * manualCalibratioMultiplier; 
-}
-
-// Función para leer voltaje de paneles con manejo de errores
-float getPanelVoltage() {
-  if (!ina219_1_available) {
-    return 0.0; // Sin sensor = sin voltaje
-  }
-  
-  return ina219_1.getBusVoltage_V();
-}
-
-void setLEDSolarRobust(int state) {
-    pinMode(LED_SOLAR, OUTPUT);  // Forzar modo GPIO
-    digitalWrite(LED_SOLAR, state);
-}
-
-
-void validateLowCurrentAndControlPWM(float currentPanelCurrent) {
-  unsigned long currentTime = millis();
-  
-  // Si la corriente es mayor a 10.0 mA, resetear validación
-  if (currentPanelCurrent > 10.0) {
-    if (validatingLowCurrent || lowCurrentConfirmations > 0) {
-      // Resetear contador si la corriente vuelve a niveles normales
-      lowCurrentConfirmations = 0;
-      validatingLowCurrent = false;
-      Serial.println("✅ Corriente de paneles OK - Validación reseteada");
-    }
-    return; // Salir - no necesitamos validar
-  }
-  
-  // Si la corriente es <= 10.0 mA y el PWM no es 0, iniciar/continuar validación
-  if (currentPWM != 0) {
-    
-    // Iniciar proceso de validación si no está activo
-    if (!validatingLowCurrent) {
-      validatingLowCurrent = true;
-      lowCurrentConfirmations = 0;
-      lastLowCurrentCheck = currentTime;
-      Serial.println("⚠️ Iniciando validación de corriente baja...");
-      return;
-    }
-    
-    // Verificar si es tiempo de hacer otra confirmación
-    if (currentTime - lastLowCurrentCheck >= CONFIRMATION_INTERVAL) {
-      lowCurrentConfirmations++;
-      lastLowCurrentCheck = currentTime;
-      
-      Serial.printf("🔍 Confirmación %d/%d - Corriente: %.1f mA\n", 
-                    lowCurrentConfirmations, REQUIRED_CONFIRMATIONS, currentPanelCurrent);
-      
-      // Si hemos confirmado suficientes veces, aplicar PWM = 0
-      if (lowCurrentConfirmations >= REQUIRED_CONFIRMATIONS) {
-        currentPWM = 0;
-        setPWM(currentPWM); // Asegurar que se aplique el cambio
-        validatingLowCurrent = false;
-        lowCurrentConfirmations = 0;
-        
-        Serial.println("🛑 CONFIRMADO: Forzando PWM a 0 - Sin corriente de paneles detectada");
-        notaPersonalizada = "PWM=0: Sin corriente de paneles (5 confirmaciones)";
-      }
-    }
-  }
-}
 
 
 
 void setup() {
   Serial.begin(9600);
   delay(1000);
-
-  // Deshabilitar logs de error I2C para evitar spam en el puerto serial
-  esp_log_level_set("i2c.master", ESP_LOG_NONE);
-  esp_log_level_set("i2c", ESP_LOG_WARN);
-
   Serial.println("Iniciando sensores INA219...");
 
   // Pines de control
@@ -853,22 +532,17 @@ void setup() {
   // Inicializar I2C
   Wire.begin(SDA_PIN, SCL_PIN);
 
- // Inicializar sensor de paneles (0x40) SIN bloquear
-  if (ina219_1.begin()) {
-  configureINA219ForPanel();  // Usar calibración personalizada
-  ina219_1_available = true;
-  Serial.println("✅ Sensor INA219 paneles (0x40) inicializado - Shunt 10mΩ");
-  } else {
-    ina219_1_available = false;
-    Serial.println("⚠️ Sensor INA219 paneles (0x40) no encontrado");
+  // Inicializar sensores INA219
+  if (!ina219_1.begin()) {
+    Serial.println("No se pudo encontrar INA219 en 0x40.");
+    while (1);
   }
-
-
   if (!ina219_2.begin()) {
     Serial.println("No se pudo encontrar INA219 en 0x41.");
     while (1);
   }
 
+  ina219_1.setCalibration_32V_2A();
   ina219_2.setCalibration_32V_2A();
 
   Serial.println("Sensores INA219 listos.");
@@ -881,7 +555,7 @@ void setup() {
   }
 
   // Iniciar PWM en cero
-  setPWM(0);
+  setPWM(10);
   currentState = BULK_CHARGE;
 
   // Añadir detección inicial del estado de la batería
@@ -947,51 +621,141 @@ void setup() {
   // Iniciar el servidor web
   initWebServer();
   initSerialCommunication();
-
-  pinMode(LED_SOLAR, OUTPUT);
-  digitalWrite(LED_SOLAR, LOW);
-
 }
 
 void loop() {
   esp_task_wdt_reset();
 
-  // Encender LED si hay corriente desde el panel Y sensor disponible
-  if (ina219_1_available && panelToBatteryCurrent > 10) {
-    //digitalWrite(LED_SOLAR, HIGH);
-    setLEDSolarRobust(HIGH);  // Usar función robusta para evitar problemas de GPIO
-  } else {
-    //digitalWrite(LED_SOLAR, LOW);
-    setLEDSolarRobust(LOW);  // Usar función robusta para evitar problemas de GPIO
-  }
+  unsigned long now = millis();
 
-  unsigned long currentTime = millis();
-
-  // ===== TAREAS QUE SE EJECUTAN CONTINUAMENTE (SIN DELAY) =====
-  
-  // Manejar comandos seriales (debe ejecutarse frecuentemente)
-  handleSerialCommands();
-  
-  // Manejar servidor web (debe ejecutarse frecuentemente)
-  handleWebServer();
-  
-  // Verificar sensor de paneles periódicamente
-  checkPanelSensorAvailability();
-  
-  // Actualizar tracking de Ah y guardar estado
   updateAhTracking();
   saveChargingState();
-  
-  // Enviar actualizaciones seriales periódicas
+
+  handleSerialCommands();
   periodicSerialUpdate();
 
-  // ===== TAREAS QUE SE EJECUTAN CADA 1 SEGUNDO =====
-  if (currentTime - previousMainLoopTime >= MAIN_LOOP_INTERVAL) {
-    previousMainLoopTime = currentTime;
-    
-    // Ejecutar las tareas principales cada 1 segundo
-    executeMainLoopTasks();
+  // Leer datos de sensores
+  panelToBatteryCurrent = getAverageCurrent(ina219_1);
+  batteryToLoadCurrent = getAverageCurrent(ina219_2);
+  float voltagePanel = ina219_1.getBusVoltage_V();
+  float voltageBatterySensor2 = ina219_2.getBusVoltage_V();
+
+  // Encender LED si hay corriente desde el panel
+  if (panelToBatteryCurrent > 50) {
+    digitalWrite(LED_SOLAR, HIGH);
+  } else {
+    digitalWrite(LED_SOLAR, LOW);
   }
+
+  // Mostrar en serial
+  Serial.println("--------------------------------------------");
+  Serial.print("Panel->Batería: Corriente = ");
+  Serial.print(panelToBatteryCurrent);
+  Serial.print(" mA, VoltajePanel = ");
+  Serial.print(voltagePanel);
+  Serial.println(" V");
+
+  Serial.print("Batería->Carga : Corriente = ");
+  Serial.print(batteryToLoadCurrent);
+  Serial.print(" mA, VoltajeBat = ");
+  Serial.print(voltageBatterySensor2);
+  Serial.println(" V");
+
+  Serial.print("Estado de carga: ");
+  Serial.println(getChargeStateString(currentState));
+
+  Serial.print("Voltaje etapa BULK: ");
+  Serial.println(bulkVoltage);
+
+  if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
+    currentPWM = 0;
+    Serial.println("Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
+  }
+
+  // Control de voltaje (LVD y LVR)
+  if (!temporaryLoadOff) {
+    if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, LOW);
+      Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)");
+    } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
+    }
+  } else {
+    // Si hay un apagado temporal activo, verificar si debe terminar
+    if (millis() - loadOffStartTime >= loadOffDuration) {
+      temporaryLoadOff = false;
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      notaPersonalizada = "Apagado temporal completado, carga reactivada";
+      Serial.println("⏰ Apagado temporal completado, carga reactivada");
+    }
+  }
+
+  // RE-ENTRY CHECK
+  const float reEnterBulkVoltage = 12.6;
+  const unsigned long reEnterTime = 30000UL;
+  static unsigned long lowVoltageStart = 0;
+  static bool belowThreshold = false;
+
+  if (voltageBatterySensor2 < reEnterBulkVoltage) {
+    if (!belowThreshold) {
+      belowThreshold = true;
+      lowVoltageStart = millis();
+    } else {
+      if (millis() - lowVoltageStart >= reEnterTime) {
+        if (currentState != BULK_CHARGE) {
+          currentState = BULK_CHARGE;
+          Serial.println("-> Forzando retorno a BULK_CHARGE (batería < 12.6 V por 30s)");
+        }
+      }
+    }
+  } else {
+    belowThreshold = false;
+    lowVoltageStart = 0;
+  }
+
+  updateChargeState(voltageBatterySensor2, panelToBatteryCurrent);
+
+
+  // Recalcular horas máximas si se usa fuente DC
+  if (useFuenteDC && fuenteDC_Amps > 0) {
+    maxBulkHours = batteryCapacity / fuenteDC_Amps;
+    
+    // Solo actualizar la nota si no estamos en estado de ERROR
+    if (currentState != ERROR) {
+      if (currentState == BULK_CHARGE) {
+        // La nota ya se actualiza en el control de Bulk
+      } else {
+        notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
+      }
+    }
+  } else {
+    maxBulkHours = 0.0;
+    
+    // Solo actualizar la nota si no estamos en estado de ERROR
+    if (currentState != ERROR) {
+      notaPersonalizada = "Usando paneles solares";
+    }
+  }
+
+
+  temperature = readTemperature();
+  Serial.print("Temperatura: ");
+  Serial.print(temperature);
+  Serial.println(" °C");
+  if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
+    Serial.println("¡Temperatura crítica! Apagando el circuito...");
+    currentState = ERROR;
+  }
+  Serial.println("Panel->Batería: " + String(panelToBatteryCurrent) + " mA");
+  Serial.println("Batería->Carga: " + String(batteryToLoadCurrent) + " mA");
+  Serial.println("Voltaje Panel: " + String(ina219_1.getBusVoltage_V()) + " V");
+  Serial.println("Voltaje Batería: " + String(ina219_2.getBusVoltage_V()) + " V");
+  Serial.println("Estado: " + getChargeStateString(currentState));
+  Serial.println("pwmValue: " + String(currentPWM));
+  handleWebServer();
+
+  delay(1000);
 }
 
 void saveChargingState() {
@@ -1157,7 +921,6 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
           Serial.println("-> Transición a ABSORPTION_CHARGE");
         }
       }
-      currentBulkHours = 0.0; // Reset porque ya no estamos en BULK
       break;
 
     case FLOAT_CHARGE:
@@ -1174,24 +937,23 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         currentState = ABSORPTION_CHARGE;
         Serial.println("-> Transición a ABSORPTION_CHARGE");
       }
-      currentBulkHours = 0.0; // Reset porque ya no estamos en BULK
       break;
 
     case ERROR:
       digitalWrite(LOAD_CONTROL_PIN, LOW);
-      setPWM(1);
+      setPWM(20);
       notaPersonalizada = "estoy en la sección Error"; 
-      // while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
-      //     batteryVoltage >= maxBatteryVoltageAllowed ) {
-      //     //pinMode(LED_SOLAR, OUTPUT);
-      //     delay(100);
-      //     digitalWrite(LED_SOLAR, LOW);
-      //     delay(100);
-      //     digitalWrite(LED_SOLAR, HIGH);
-      //     delay(100);
-      //     esp_task_wdt_reset();  // Reset para evitar reinicio
-      //     batteryVoltage = ina219_2.getBusVoltage_V();
-      // }
+      while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
+          batteryVoltage >= maxBatteryVoltageAllowed ) {
+          pinMode(LED_SOLAR, OUTPUT);
+          delay(100);
+          digitalWrite(LED_SOLAR, LOW);
+          delay(100);
+          digitalWrite(LED_SOLAR, HIGH);
+          delay(100);
+          esp_task_wdt_reset();  // Reset para evitar reinicio
+          batteryVoltage = ina219_2.getBusVoltage_V();
+      }
       currentState =ABSORPTION_CHARGE;
       break;
   }
@@ -1295,140 +1057,4 @@ float readTemperature() {
   temperature -= 273.15;                               // Convertir a °C
 
   return temperature;
-}
-
-
-
-// ========== FUNCIÓN PARA LAS TAREAS PRINCIPALES ==========
-void executeMainLoopTasks() {
-  // Leer datos de sensores con manejo de errores
-  panelToBatteryCurrent = getPanelCurrent(); 
-  batteryToLoadCurrent = getAverageCurrent(ina219_2); 
-  float voltagePanel = getPanelVoltage(); 
-  float voltageBatterySensor2 = ina219_2.getBusVoltage_V(); 
-
-  
-
-  // Mostrar en serial
-  Serial.println("--------------------------------------------");
-  Serial.print("Panel->Batería: Corriente = ");
-  Serial.print(panelToBatteryCurrent);
-  Serial.print(" mA, VoltajePanel = ");
-  Serial.print(voltagePanel);
-  Serial.print(" V");
-  if (!ina219_1_available) {
-    Serial.println(" [SIN SENSOR - Usando 0mA]");
-  } else {
-    Serial.println(" [Sensor OK]");
-  }
-
-  Serial.print("Batería->Carga : Corriente = ");
-  Serial.print(batteryToLoadCurrent);
-  Serial.print(" mA, VoltajeBat = ");
-  Serial.print(voltageBatterySensor2);
-  Serial.println(" V");
-
-  Serial.print("Estado de carga: ");
-  Serial.println(getChargeStateString(currentState));
-
-  Serial.print("Voltaje etapa BULK: ");
-  Serial.println(bulkVoltage);
-  
-  // Validación robusta de corriente baja con confirmaciones múltiples
-  validateLowCurrentAndControlPWM(panelToBatteryCurrent);
-
-  // Control de voltaje (LVD y LVR)
-  if (!temporaryLoadOff) {
-    if (voltageBatterySensor2 < LVD || voltageBatterySensor2 > maxBatteryVoltageAllowed) {
-      digitalWrite(LOAD_CONTROL_PIN, LOW);
-      Serial.println("Desactivando el sistema (voltaje < LVD | voltageBatterySensor2 > maxBatteryVoltageAllowed)");
-    } else if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
-      digitalWrite(LOAD_CONTROL_PIN, HIGH);
-      Serial.println("Reactivando el sistema (voltaje > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed)");
-    }
-  } else {
-    // ✅ NUEVA VERIFICACIÓN: Control de tiempo máximo durante apagado temporal
-    unsigned long currentOffTime = millis() - loadOffStartTime;
-    
-    // Si ya pasó el tiempo O si excede el límite máximo por seguridad
-    if (currentOffTime >= loadOffDuration || currentOffTime >= MAX_LOAD_OFF_DURATION) {
-      temporaryLoadOff = false;
-      
-      // Verificar voltaje antes de reactivar
-      if (voltageBatterySensor2 > LVR && voltageBatterySensor2 < maxBatteryVoltageAllowed) {
-        digitalWrite(LOAD_CONTROL_PIN, HIGH);
-        
-        if (currentOffTime >= MAX_LOAD_OFF_DURATION) {
-          notaPersonalizada = "Apagado finalizado por límite de seguridad (8h)";
-          Serial.println("🛡️ Apagado temporal finalizado por límite de seguridad");
-        } else {
-          notaPersonalizada = "Apagado temporal completado, carga reactivada";
-          Serial.println("⏰ Apagado temporal completado, carga reactivada");
-        }
-      } else {
-        notaPersonalizada = "Apagado completado pero voltaje insuficiente para reactivar";
-        Serial.println("⚠️ Apagado temporal completado pero voltaje insuficiente");
-      }
-    }
-  }
-
-  // RE-ENTRY CHECK
-  const float reEnterBulkVoltage = 12.6;
-  const unsigned long reEnterTime = 30000UL;
-  static unsigned long lowVoltageStart = 0;
-  static bool belowThreshold = false;
-
-  if (voltageBatterySensor2 < reEnterBulkVoltage) {
-    if (!belowThreshold) {
-      belowThreshold = true;
-      lowVoltageStart = millis();
-    } else {
-      if (millis() - lowVoltageStart >= reEnterTime) {
-        if (currentState != BULK_CHARGE) {
-          currentState = BULK_CHARGE;
-          Serial.println("-> Forzando retorno a BULK_CHARGE (batería < 12.6 V por 30s)");
-        }
-      }
-    }
-  } else {
-    belowThreshold = false;
-    lowVoltageStart = 0;
-  }
-
-  updateChargeState(voltageBatterySensor2, panelToBatteryCurrent);
-
-  // Recalcular horas máximas si se usa fuente DC
-  if (useFuenteDC && fuenteDC_Amps > 0) {
-    maxBulkHours = batteryCapacity / fuenteDC_Amps;
-    
-    if (currentState != ERROR) {
-      if (currentState == BULK_CHARGE) {
-        // La nota ya se actualiza en el control de Bulk
-      } else {
-        notaPersonalizada = "Tiempo máx. en Bulk: " + String(maxBulkHours, 1) + " horas";
-      }
-    }
-  } else {
-    maxBulkHours = 0.0;
-    
-    if (currentState != ERROR) {
-      notaPersonalizada = "Usando paneles solares";
-    }
-  }
-
-  temperature = readTemperature();
-  Serial.print("Temperatura: ");
-  Serial.print(temperature);
-  Serial.println(" °C");
-  if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
-    Serial.println("¡Temperatura crítica! Apagando el circuito...");
-    currentState = ERROR;
-  }
-  
-  Serial.println("Panel->Batería: " + String(panelToBatteryCurrent) + " mA");
-  Serial.println("Batería->Carga: " + String(batteryToLoadCurrent) + " mA");
-  Serial.println("Voltaje Panel: " + String(ina219_1.getBusVoltage_V()) + " V");
-  Serial.println("Voltaje Batería: " + String(ina219_2.getBusVoltage_V()) + " V");
-  Serial.println("Estado: " + getChargeStateString(currentState));
-  Serial.println("pwmValue: " + String(currentPWM));
 }
