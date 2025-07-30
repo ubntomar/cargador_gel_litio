@@ -12,7 +12,7 @@
 const unsigned long MAX_LOAD_OFF_DURATION = 28800000UL; // 8 horas en milisegundos
 const unsigned long MAX_LOAD_OFF_SECONDS = 28800UL;     // 8 horas en segundos
 
-// ========== PROTOCOLO SERIAL ORANGE PI ==========
+// ========== PROTOCOLO SERIAL ORANGE PI ===========
 // Definir pines para UART0 (comunicación con Orange Pi)
 #define RX_PIN_SERIAL 20  // GPIO20 - Pin RX físico
 #define TX_PIN_SERIAL 21  // GPIO21 - Pin TX físico
