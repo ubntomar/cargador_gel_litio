@@ -764,9 +764,30 @@ void loop() {
   Serial.print("Voltaje etapa BULK: ");
   Serial.println(bulkVoltage);
 
-  if (panelToBatteryCurrent <= 10.0 && currentPWM != 0) {
-    currentPWM = 0;
-    Serial.println("Forzando el PWM a 0 ya que NO se detecta presencia de corriente de páneles solares");
+  // === PROTECCIÓN INTELIGENTE CONTRA RESET PWM POR BAJA CORRIENTE ===
+  static unsigned long lowCurrentStart = 0;
+  static bool lowCurrentDetected = false;
+  const unsigned long LOW_CURRENT_TIMEOUT = 3000; // 3 segundos de gracia
+  
+  if (panelToBatteryCurrent <= 5.0) {
+    if (!lowCurrentDetected) {
+      // Primera detección de corriente baja - iniciar contador
+      lowCurrentDetected = true;
+      lowCurrentStart = millis();
+      Serial.println("⚠️ Corriente baja detectada (" + String(panelToBatteryCurrent, 1) + "mA) - iniciando período de gracia de 3s");
+    } else if (millis() - lowCurrentStart >= LOW_CURRENT_TIMEOUT && currentPWM != 0) {
+      // Corriente baja confirmada tras 3 segundos - proceder con reset
+      currentPWM = 0;
+      Serial.println("🚨 PWM forzado a 0 tras 3s sin corriente de paneles solares (corriente: " + String(panelToBatteryCurrent, 1) + "mA)");
+      lowCurrentDetected = false; // Reset para próxima detección
+    }
+    // Si estamos en período de gracia, no hacer nada (mantener PWM actual)
+  } else {
+    // Corriente normal detectada - cancelar cualquier proceso de reset
+    if (lowCurrentDetected) {
+      Serial.println("✅ Corriente normalizada (" + String(panelToBatteryCurrent, 1) + "mA) - cancelando reset PWM");
+      lowCurrentDetected = false;
+    }
   }
 
   // Control de voltaje (LVD y LVR)
@@ -1207,7 +1228,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
           floatControl(batteryVoltage, floatVoltage);
         } else {
           Serial.println("Corriente excesiva detectada en FLOAT_CHARGE. Reduciendo PWM.");
-          adjustPWM(-5);
+          adjustPWM(-2);
         }
       } else {
         Serial.println("Batería de litio: Ignorando etapa FLOAT");
