@@ -593,6 +593,7 @@ void setup() {
         currentState = FLOAT_CHARGE;
         notaPersonalizada = "Iniciado en FLOAT: Batería GEL con voltaje alto (" + String(initialBatteryVoltage, 2) + "V >= " + String(chargedBatteryRestVoltage, 2) + "V)";
         Serial.println("Batería GEL detectada con carga alta - iniciando en FLOAT_CHARGE");
+        Serial.println("⚠️ [CRÍTICO] Iniciando en FLOAT - SOC será estimado desde voltaje, no desde acumulación real");
       } else {
         currentState = ABSORPTION_CHARGE;
         Serial.println("Batería LITIO detectada con carga alta - iniciando en ABSORPTION_CHARGE");
@@ -912,24 +913,44 @@ void updateAhTracking() {
 
 void resetChargingCycle() {
   float batteryVoltage = ina219_2.getBusVoltage_V();
+  float currentSOC = (accumulatedAh / batteryCapacity) * 100.0;
+  float voltageBasedSOC = getSOCFromVoltage(batteryVoltage);
+  
+  Serial.println("🔄 [Reset Cycle] Estado actual:");
+  Serial.println("   SOC acumulado: " + String(currentSOC, 1) + "% (" + String(accumulatedAh, 2) + " Ah)");
+  Serial.println("   SOC por voltaje: " + String(voltageBasedSOC, 1) + "% (" + String(batteryVoltage, 2) + "V)");
   
   if (currentState == FLOAT_CHARGE) {
-    // === CORRECCIÓN: Reset inteligente en FLOAT ===
-    // Si estamos en FLOAT, la batería debería estar ~95-100% cargada
-    accumulatedAh = batteryCapacity * 0.95;
-    Serial.println("🔄 [Reset Cycle] FLOAT: AccumulatedAh ajustado a 95% (" + String(accumulatedAh, 1) + " Ah)");
-  } else {
-    // === CORRECCIÓN: Reset basado en voltaje actual ===
-    float estimatedSOC = getSOCFromVoltage(batteryVoltage);
-    
-    if (estimatedSOC > 80.0) {
-      // Batería con alta carga - mantener estimación del voltaje
-      accumulatedAh = (estimatedSOC / 100.0) * batteryCapacity;
-      Serial.println("🔄 [Reset Cycle] Batería alta carga: AccumulatedAh ajustado a " + String(accumulatedAh, 1) + " Ah (" + String(estimatedSOC, 1) + "% SOC)");
+    // === CORRECCIÓN CRÍTICA: NO sobrescribir SOC real ===
+    // Solo ajustar si el SOC acumulado es muy bajo comparado con el voltaje
+    if (currentSOC < voltageBasedSOC - 10.0) {
+      // Gran discrepancia - usar promedio ponderado
+      float adjustedSOC = (currentSOC * 0.7) + (voltageBasedSOC * 0.3);
+      accumulatedAh = (adjustedSOC / 100.0) * batteryCapacity;
+      Serial.println("🔄 [Reset Cycle] FLOAT: Ajuste por discrepancia - SOC corregido a " + String(adjustedSOC, 1) + "% (" + String(accumulatedAh, 2) + " Ah)");
+    } else if (currentSOC < 85.0) {
+      // SOC muy bajo para estar en FLOAT - ajustar conservadoramente
+      accumulatedAh = batteryCapacity * 0.85;
+      Serial.println("🔄 [Reset Cycle] FLOAT: SOC bajo detectado - ajustado a 85% (" + String(accumulatedAh, 1) + " Ah)");
     } else {
-      // Batería con baja carga - reset conservador
-      accumulatedAh = 0;
-      Serial.println("🔄 [Reset Cycle] Batería baja carga: AccumulatedAh reseteado a 0 Ah");
+      // SOC coherente - mantener valor acumulado
+      Serial.println("🔄 [Reset Cycle] FLOAT: Manteniendo SOC acumulado coherente (" + String(currentSOC, 1) + "%)");
+    }
+  } else {
+    // === CORRECCIÓN: Reset más inteligente para otros estados ===
+    if (voltageBasedSOC > 80.0) {
+      // Batería con alta carga - usar el mayor entre acumulado y voltaje
+      float bestSOC = max(currentSOC, voltageBasedSOC);
+      accumulatedAh = (bestSOC / 100.0) * batteryCapacity;
+      Serial.println("🔄 [Reset Cycle] Batería alta carga: AccumulatedAh ajustado a " + String(accumulatedAh, 1) + " Ah (" + String(bestSOC, 1) + "% SOC)");
+    } else if (currentSOC > voltageBasedSOC + 20.0) {
+      // SOC acumulado muy alto vs voltaje - posible error
+      float adjustedSOC = voltageBasedSOC + 10.0; // Ajuste conservador
+      accumulatedAh = (adjustedSOC / 100.0) * batteryCapacity;
+      Serial.println("🔄 [Reset Cycle] Corrección por SOC excesivo: ajustado a " + String(adjustedSOC, 1) + "% (" + String(accumulatedAh, 2) + " Ah)");
+    } else {
+      // Mantener valor actual si es coherente
+      Serial.println("🔄 [Reset Cycle] SOC coherente - manteniendo " + String(currentSOC, 1) + "% (" + String(accumulatedAh, 2) + " Ah)");
     }
   }
   
@@ -953,10 +974,28 @@ float calculateAbsorptionTime() {
 }
 
 float getSOCFromVoltage(float voltage) {
-  if (voltage >= 14.4) return 90.0;
-  else if (voltage >= 13.2) return map(voltage, 13.2, 14.4, 20.0, 90.0);
-  else if (voltage >= 12.0) return map(voltage, 12.0, 13.2, 0.0, 20.0);
-  return 0.0;
+  // === CORRECCIÓN: Curva SOC más realista para baterías GEL ===
+  // Basado en voltaje en reposo (sin carga ni descarga activa)
+  
+  if (voltage >= 14.4) {
+    return 100.0; // Voltaje de carga completa
+  } else if (voltage >= 13.8) {
+    return map(voltage, 13.8, 14.4, 95.0, 100.0); // 95-100%
+  } else if (voltage >= 13.2) {
+    return map(voltage, 13.2, 13.8, 80.0, 95.0);  // 80-95%
+  } else if (voltage >= 12.8) {
+    return map(voltage, 12.8, 13.2, 60.0, 80.0);  // 60-80%
+  } else if (voltage >= 12.4) {
+    return map(voltage, 12.4, 12.8, 40.0, 60.0);  // 40-60%
+  } else if (voltage >= 12.0) {
+    return map(voltage, 12.0, 12.4, 20.0, 40.0);  // 20-40%
+  } else if (voltage >= 11.8) {
+    return map(voltage, 11.8, 12.0, 10.0, 20.0);  // 10-20%
+  } else if (voltage >= 11.5) {
+    return map(voltage, 11.5, 11.8, 5.0, 10.0);   // 5-10%
+  } else {
+    return 0.0; // Batería descargada crítica
+  }
 }
 
 float getAverageCurrent(Adafruit_INA219 &ina) {
