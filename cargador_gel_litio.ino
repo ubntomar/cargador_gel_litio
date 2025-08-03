@@ -560,25 +560,56 @@ void setup() {
 
   // Añadir detección inicial del estado de la batería
   float initialBatteryVoltage = ina219_2.getBusVoltage_V();
-
-  if (initialBatteryVoltage >= chargedBatteryRestVoltage) {
-    if (!isLithium) {
-      currentState = FLOAT_CHARGE;
-      Serial.println("Batería GEL detectada con carga alta - iniciando en FLOAT_CHARGE");
-    } else {
-      currentState = ABSORPTION_CHARGE;
-      Serial.println("Batería LITIO detectada con carga alta - iniciando en FLOAT_CHARGE");
-    }
-  } else {
-    currentState = BULK_CHARGE;
-    Serial.println("Batería requiere carga - iniciando en BULK_CHARGE");
+  float initialTemperature = readTemperature();
+  
+  // === VERIFICACIÓN DE SEGURIDAD AL INICIO - CRÍTICO ===
+  // NO encender carga si hay condiciones de error al arrancar
+  bool safeToStart = true;
+  String safetyMessage = "";
+  
+  // Verificar condiciones críticas
+  if (initialTemperature >= TEMP_THRESHOLD_SHUTDOWN) {
+    safeToStart = false;
+    safetyMessage += "Temp crítica: " + String(initialTemperature, 1) + "°C; ";
   }
-
-  if(initialBatteryVoltage>=12.0){
-    digitalWrite(LOAD_CONTROL_PIN, HIGH);
-  } else{
-    digitalWrite(LOAD_CONTROL_PIN, LOW);
-
+  
+  if (initialBatteryVoltage >= maxBatteryVoltageAllowed) {
+    safeToStart = false;
+    safetyMessage += "Voltaje crítico: " + String(initialBatteryVoltage, 2) + "V; ";
+  }
+  
+  if (!safeToStart) {
+    // ⛔ CONDICIONES PELIGROSAS AL INICIO - FORZAR ERROR
+    currentState = ERROR;
+    digitalWrite(LOAD_CONTROL_PIN, LOW); // ¡NUNCA encender la carga!
+    notaPersonalizada = "INICIO INSEGURO: " + safetyMessage + "Carga BLOQUEADA hasta normalización";
+    Serial.println("🚨 ¡ALERTA DE SEGURIDAD! Condiciones críticas detectadas al inicio:");
+    Serial.println("   " + safetyMessage);
+    Serial.println("   🔒 CARGA BLOQUEADA - Sistema en ERROR hasta normalización");
+  } else {
+    // ✅ Condiciones seguras - proceder normalmente
+    if (initialBatteryVoltage >= chargedBatteryRestVoltage) {
+      if (!isLithium) {
+        currentState = FLOAT_CHARGE;
+        notaPersonalizada = "Iniciado en FLOAT: Batería GEL con voltaje alto (" + String(initialBatteryVoltage, 2) + "V >= " + String(chargedBatteryRestVoltage, 2) + "V)";
+        Serial.println("Batería GEL detectada con carga alta - iniciando en FLOAT_CHARGE");
+      } else {
+        currentState = ABSORPTION_CHARGE;
+        Serial.println("Batería LITIO detectada con carga alta - iniciando en ABSORPTION_CHARGE");
+      }
+    } else {
+      currentState = BULK_CHARGE;
+      Serial.println("Batería requiere carga - iniciando en BULK_CHARGE");
+    }
+    
+    // Solo activar carga si las condiciones están OK Y el voltaje es suficiente
+    if(initialBatteryVoltage >= 12.0) {
+      digitalWrite(LOAD_CONTROL_PIN, HIGH);
+      Serial.println("✅ Carga activada - condiciones seguras confirmadas");
+    } else {
+      digitalWrite(LOAD_CONTROL_PIN, LOW);
+      Serial.println("⚠️ Carga desactivada - voltaje insuficiente (" + String(initialBatteryVoltage, 2) + "V < 12.0V)");
+    }
   }
 
   // Configurar el punto de acceso
@@ -588,12 +619,25 @@ void setup() {
   Serial.println(WiFi.softAPIP());
 
   // Iniciar Preferences en modo lectura
- // Iniciar Preferences en modo lectura
   preferences.begin("charger", true);
   batteryCapacity = preferences.getFloat("batteryCap", 50.0);
   thresholdPercentage = preferences.getFloat("thresholdPerc", 1.0);
   maxAllowedCurrent = preferences.getFloat("maxCurrent", 6000.0);
-  accumulatedAh = preferences.getFloat("accumulatedAh", 0.0);
+  
+  // === CORRECCIÓN: Inicialización inteligente de accumulatedAh ===
+  float storedAh = preferences.getFloat("accumulatedAh", -1.0); // -1 = no guardado
+  
+  if (storedAh >= 0 && storedAh <= batteryCapacity * 1.1) {
+    // Valor guardado válido - usar como punto de partida
+    accumulatedAh = storedAh;
+    Serial.println("🔋 [Setup] AccumulatedAh restaurado: " + String(accumulatedAh, 2) + " Ah desde memoria");
+  } else {
+    // No hay valor guardado o es inválido - estimar desde voltaje
+    float estimatedSOC = getSOCFromVoltage(initialBatteryVoltage);
+    accumulatedAh = (estimatedSOC / 100.0) * batteryCapacity;
+    Serial.println("🔋 [Setup] AccumulatedAh estimado desde voltaje: " + String(accumulatedAh, 2) + " Ah (" + String(estimatedSOC, 1) + "% SOC)");
+  }
+  
   bulkVoltage = preferences.getFloat("bulkV", 14.4);
   absorptionVoltage = preferences.getFloat("absV", 14.4);
   floatVoltage = preferences.getFloat("floatV", 13.6);
@@ -743,9 +787,35 @@ void loop() {
   Serial.print("Temperatura: ");
   Serial.print(temperature);
   Serial.println(" °C");
-  if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
-    Serial.println("¡Temperatura crítica! Apagando el circuito...");
-    currentState = ERROR;
+  
+  // === VALIDACIÓN MÚLTIPLE PARA TEMPERATURA CRÍTICA - SIN DELAY ===
+  static int tempErrorCount = 0;
+  static unsigned long lastTempCheck = 0;
+  const unsigned long TEMP_CHECK_INTERVAL = 2000; // 2 segundos entre validaciones de temperatura
+  const int MAX_TEMP_ERROR_COUNT = 5; // 5 validaciones consecutivas
+  
+  unsigned long currentTime = millis();
+  
+  // Verificar temperatura crítica cada 2 segundos
+  if (currentTime - lastTempCheck >= TEMP_CHECK_INTERVAL) {
+    if (temperature >= TEMP_THRESHOLD_SHUTDOWN) {
+      tempErrorCount++;
+      Serial.println("🌡️ Temperatura crítica detectada " + String(tempErrorCount) + "/5: " + String(temperature, 1) + "°C >= " + String(TEMP_THRESHOLD_SHUTDOWN) + "°C");
+      
+      if (tempErrorCount >= MAX_TEMP_ERROR_COUNT) {
+        Serial.println("🔥 ERROR: Temperatura crítica confirmada tras " + String(MAX_TEMP_ERROR_COUNT) + " validaciones");
+        currentState = ERROR;
+        notaPersonalizada = "ERROR: Temperatura crítica confirmada (" + String(temperature, 1) + "°C >= " + String(TEMP_THRESHOLD_SHUTDOWN) + "°C)";
+        tempErrorCount = 0; // Reset contador
+      }
+    } else {
+      // Temperatura normal, resetear contador
+      if (tempErrorCount > 0) {
+        Serial.println("❄️ Temperatura normalizada, reseteando contador de errores térmicos");
+        tempErrorCount = 0;
+      }
+    }
+    lastTempCheck = currentTime;
   }
   Serial.println("Panel->Batería: " + String(panelToBatteryCurrent) + " mA");
   Serial.println("Batería->Carga: " + String(batteryToLoadCurrent) + " mA");
@@ -770,20 +840,103 @@ void saveChargingState() {
 
 void updateAhTracking() {
   unsigned long now = millis();
+  
+  // === CORRECCIÓN: Inicializar lastUpdateTime si es la primera ejecución ===
+  if (lastUpdateTime == 0) {
+    lastUpdateTime = now;
+    Serial.println("🔋 [Ah Tracking] Inicializando timestamp - primera ejecución");
+    return; // Salir para evitar cálculos erróneos en primera llamada
+  }
+  
+  // Calcular tiempo transcurrido en horas
   float deltaHours = (now - lastUpdateTime) / 3600000.0;
+  
+  // === VALIDACIÓN: Evitar cálculos con intervalos extremos ===
+  if (deltaHours > 1.0) {
+    Serial.println("⚠️ [Ah Tracking] Intervalo demasiado largo (" + String(deltaHours, 2) + "h) - posible reinicio");
+    lastUpdateTime = now;
+    return; // No actualizar Ah con intervalos sospechosos
+  }
+  
+  if (deltaHours < 0.0001) {
+    // Intervalo muy pequeño, no vale la pena calcular
+    return;
+  }
+  
+  // Convertir corrientes de mA a A
   float chargeCurrent = panelToBatteryCurrent / 1000.0;
   float dischargeCurrent = batteryToLoadCurrent / 1000.0;
-  float ahChange = (chargeCurrent * deltaHours) - (dischargeCurrent * deltaHours);
+  
+  // === CORRECCIÓN: Validar corrientes antes del cálculo ===
+  if (chargeCurrent < 0) chargeCurrent = 0;
+  if (dischargeCurrent < 0) dischargeCurrent = 0;
+  
+  // Calcular cambio en Ah (positivo = carga, negativo = descarga)
+  float ahChange = (chargeCurrent - dischargeCurrent) * deltaHours;
+  
+  // === VALIDACIÓN: Limitar cambios extremos ===
+  float maxChangePerSecond = batteryCapacity / 3600.0; // 1C rate
+  float maxChange = maxChangePerSecond * deltaHours * 3600.0; // Máximo cambio permitido
+  
+  if (abs(ahChange) > maxChange) {
+    Serial.println("⚠️ [Ah Tracking] Cambio excesivo detectado: " + String(ahChange, 3) + "Ah (máx: " + String(maxChange, 3) + "Ah)");
+    ahChange = (ahChange > 0) ? maxChange : -maxChange; // Limitar el cambio
+  }
+  
+  // Actualizar contador
+  float previousAh = accumulatedAh;
   accumulatedAh += ahChange;
+  
+  // === VALIDACIÓN: Mantener dentro de límites lógicos ===
+  if (accumulatedAh < 0) {
+    accumulatedAh = 0;
+    Serial.println("🔋 [Ah Tracking] Límite inferior: reseteando a 0 Ah");
+  }
+  
+  if (accumulatedAh > batteryCapacity * 1.1) { // Permitir 10% de sobrecarga
+    accumulatedAh = batteryCapacity * 1.1;
+    Serial.println("🔋 [Ah Tracking] Límite superior: limitando a " + String(batteryCapacity * 1.1, 1) + " Ah");
+  }
+  
+  // Debug cada 30 segundos
+  static unsigned long lastDebugTime = 0;
+  if (now - lastDebugTime >= 30000) {
+    float socPercent = (accumulatedAh / batteryCapacity) * 100.0;
+    Serial.println("🔋 [Ah Tracking] Δt=" + String(deltaHours * 3600, 1) + "s, ΔAh=" + String(ahChange, 4) + ", Total=" + String(accumulatedAh, 2) + "Ah (" + String(socPercent, 1) + "%)");
+    Serial.println("   Entrada: " + String(chargeCurrent, 3) + "A, Salida: " + String(dischargeCurrent, 3) + "A, Neta: " + String(chargeCurrent - dischargeCurrent, 3) + "A");
+    lastDebugTime = now;
+  }
+  
   lastUpdateTime = now;
 }
 
 void resetChargingCycle() {
+  float batteryVoltage = ina219_2.getBusVoltage_V();
+  
   if (currentState == FLOAT_CHARGE) {
+    // === CORRECCIÓN: Reset inteligente en FLOAT ===
+    // Si estamos en FLOAT, la batería debería estar ~95-100% cargada
     accumulatedAh = batteryCapacity * 0.95;
+    Serial.println("🔄 [Reset Cycle] FLOAT: AccumulatedAh ajustado a 95% (" + String(accumulatedAh, 1) + " Ah)");
   } else {
-    accumulatedAh = 0;
+    // === CORRECCIÓN: Reset basado en voltaje actual ===
+    float estimatedSOC = getSOCFromVoltage(batteryVoltage);
+    
+    if (estimatedSOC > 80.0) {
+      // Batería con alta carga - mantener estimación del voltaje
+      accumulatedAh = (estimatedSOC / 100.0) * batteryCapacity;
+      Serial.println("🔄 [Reset Cycle] Batería alta carga: AccumulatedAh ajustado a " + String(accumulatedAh, 1) + " Ah (" + String(estimatedSOC, 1) + "% SOC)");
+    } else {
+      // Batería con baja carga - reset conservador
+      accumulatedAh = 0;
+      Serial.println("🔄 [Reset Cycle] Batería baja carga: AccumulatedAh reseteado a 0 Ah");
+    }
   }
+  
+  // Validar que el valor esté dentro de límites lógicos
+  if (accumulatedAh < 0) accumulatedAh = 0;
+  if (accumulatedAh > batteryCapacity * 1.1) accumulatedAh = batteryCapacity * 1.1;
+  
   saveChargingState();
 }
 
@@ -825,10 +978,40 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
   float batteryNetCurrent;
   float batteryNetCurrentAmps;
   float initialSOC = 0.0;
-  if (batteryVoltage >= maxBatteryVoltageAllowed) {
-    currentState = ERROR;
-    Serial.println("ERROR: Voltaje de batería demasiado alto");
-    //return;
+  
+  // === VALIDACIÓN MÚLTIPLE PARA ERROR - SIN DELAY ===
+  static int voltageErrorCount = 0;
+  static unsigned long lastVoltageCheck = 0;
+  const unsigned long CHECK_INTERVAL = 1000; // 1 segundo entre validaciones
+  const int MAX_ERROR_COUNT = 5; // 5 validaciones consecutivas
+  
+  unsigned long now = millis();
+  
+  // Verificar voltaje crítico cada segundo
+  if (now - lastVoltageCheck >= CHECK_INTERVAL) {
+    if (batteryVoltage >= maxBatteryVoltageAllowed) {
+      voltageErrorCount++;
+      Serial.println("⚠️ Voltaje crítico detectado " + String(voltageErrorCount) + "/5: " + String(batteryVoltage, 2) + "V >= " + String(maxBatteryVoltageAllowed, 1) + "V");
+      
+      if (voltageErrorCount >= MAX_ERROR_COUNT) {
+        currentState = ERROR;
+        notaPersonalizada = "ERROR: Voltaje crítico confirmado tras 5 validaciones (" + String(batteryVoltage, 2) + "V >= " + String(maxBatteryVoltageAllowed, 1) + "V)";
+        Serial.println("🚨 ERROR: Voltaje de batería confirmado demasiado alto tras " + String(MAX_ERROR_COUNT) + " validaciones");
+        voltageErrorCount = 0; // Reset contador
+      }
+    } else {
+      // Voltaje normal, resetear contador
+      if (voltageErrorCount > 0) {
+        Serial.println("✅ Voltaje normalizado, reseteando contador de errores");
+        voltageErrorCount = 0;
+      }
+    }
+    lastVoltageCheck = now;
+  }
+  
+  // Si ya estamos en ERROR, no procesar otros estados
+  if (currentState == ERROR) {
+    return;
   }
 
   switch (currentState) {
@@ -904,6 +1087,7 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         if (!isLithium) {
           currentState = FLOAT_CHARGE;
           resetChargingCycle();
+          notaPersonalizada = "Transición a FLOAT: Corriente neta baja (" + String(batteryNetCurrent, 1) + "mA <= " + String(absorptionCurrentThreshold_mA, 1) + "mA)";
           Serial.println("-> Transición a FLOAT_CHARGE (corriente neta < threshold)");
         } else {
           Serial.println("Batería de litio: Ignorando etapa FLOAT");
@@ -914,6 +1098,8 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
         if (!isLithium) {
           currentState = FLOAT_CHARGE;
           resetChargingCycle();
+          float timeElapsed = (millis() - absorptionStartTime) / 1000.0 / 3600.0;
+          notaPersonalizada = "Transición a FLOAT: Tiempo de absorción cumplido (" + String(timeElapsed, 2) + "h >= " + String(calculatedAbsorptionHours, 2) + "h)";
           Serial.println("-> Transición a FLOAT_CHARGE (tiempo calculado alcanzado)");
         } else {
           Serial.println("Batería de litio: Ignorando etapa FLOAT");
@@ -940,21 +1126,79 @@ void updateChargeState(float batteryVoltage, float chargeCurrent) {
       break;
 
     case ERROR:
-      digitalWrite(LOAD_CONTROL_PIN, LOW);
-      setPWM(20);
-      notaPersonalizada = "estoy en la sección Error"; 
-      while (temperature >= TEMP_THRESHOLD_SHUTDOWN ||
-          batteryVoltage >= maxBatteryVoltageAllowed ) {
-          pinMode(LED_SOLAR, OUTPUT);
-          delay(100);
-          digitalWrite(LED_SOLAR, LOW);
-          delay(100);
-          digitalWrite(LED_SOLAR, HIGH);
-          delay(100);
-          esp_task_wdt_reset();  // Reset para evitar reinicio
-          batteryVoltage = ina219_2.getBusVoltage_V();
+      // === MANEJO DE ERROR SIN DELAY - NO BLOQUEANTE ===
+      static bool errorInitialized = false;
+      static unsigned long lastErrorCheck = 0;
+      static unsigned long lastLedToggle = 0;
+      static bool ledErrorState = false;
+      const unsigned long ERROR_CHECK_INTERVAL = 2000; // Verificar condiciones cada 2 segundos
+      const unsigned long LED_BLINK_INTERVAL = 200;    // Parpadeo cada 200ms
+      
+      unsigned long currentTime = millis();
+      
+      // Inicializar estado de error solo una vez
+      if (!errorInitialized) {
+        digitalWrite(LOAD_CONTROL_PIN, LOW);
+        setPWM(20);
+        pinMode(LED_SOLAR, OUTPUT);
+        notaPersonalizada = "ERROR: Sistema en modo protección - verificando condiciones cada 2s";
+        Serial.println("🚨 Entrando en modo ERROR - sistema protegido");
+        errorInitialized = true;
+        lastErrorCheck = currentTime;
+        lastLedToggle = currentTime;
       }
-      currentState =ABSORPTION_CHARGE;
+      
+      // Parpadeo del LED sin bloquear - cada 200ms
+      if (currentTime - lastLedToggle >= LED_BLINK_INTERVAL) {
+        ledErrorState = !ledErrorState;
+        digitalWrite(LED_SOLAR, ledErrorState ? HIGH : LOW);
+        lastLedToggle = currentTime;
+      }
+      
+      // Verificar condiciones de error cada 2 segundos
+      if (currentTime - lastErrorCheck >= ERROR_CHECK_INTERVAL) {
+        esp_task_wdt_reset(); // Reset watchdog
+        
+        // Obtener lecturas actuales
+        float currentTemp = readTemperature();
+        float currentVoltage = ina219_2.getBusVoltage_V();
+        
+        Serial.println("🔍 [ERROR] Verificando condiciones:");
+        Serial.println("   Temperatura: " + String(currentTemp, 1) + "°C (límite: " + String(TEMP_THRESHOLD_SHUTDOWN) + "°C)");
+        Serial.println("   Voltaje: " + String(currentVoltage, 2) + "V (límite: " + String(maxBatteryVoltageAllowed, 1) + "V)");
+        
+        // Verificar si las condiciones se han normalizado
+        if (currentTemp < TEMP_THRESHOLD_SHUTDOWN && currentVoltage < maxBatteryVoltageAllowed) {
+          // === VERIFICACIÓN ADICIONAL DE SEGURIDAD ANTES DE SALIR DE ERROR ===
+          // Asegurar que el voltaje también sea suficiente para operación segura
+          if (currentVoltage >= 12.0) {
+            // Condiciones completamente normalizadas - salir de ERROR
+            currentState = ABSORPTION_CHARGE;
+            errorInitialized = false; // Reset para próxima vez
+            digitalWrite(LED_SOLAR, LOW); // Apagar LED de error
+            // ✅ AHORA SÍ es seguro activar la carga
+            digitalWrite(LOAD_CONTROL_PIN, HIGH);
+            notaPersonalizada = "Recuperación de ERROR: Condiciones normalizadas, carga REACTIVADA, regresando a ABSORPTION";
+            Serial.println("✅ [ERROR] Condiciones completamente normalizadas:");
+            Serial.println("   🌡️ Temperatura OK: " + String(currentTemp, 1) + "°C < " + String(TEMP_THRESHOLD_SHUTDOWN) + "°C");
+            Serial.println("   ⚡ Voltaje OK: " + String(currentVoltage, 2) + "V < " + String(maxBatteryVoltageAllowed, 1) + "V");
+            Serial.println("   🔋 Voltaje operacional: " + String(currentVoltage, 2) + "V >= 12.0V");
+            Serial.println("   🔌 CARGA REACTIVADA - transición segura a ABSORPTION_CHARGE");
+          } else {
+            // Temperatura y voltaje máximo OK, pero voltaje muy bajo para activar carga
+            notaPersonalizada = "ERROR normalizado pero voltaje muy bajo (" + String(currentVoltage, 2) + "V < 12.0V) - carga BLOQUEADA";
+            Serial.println("⚠️ [ERROR] Temperatura y voltaje máximo normalizados, pero:");
+            Serial.println("   🔋 Voltaje insuficiente: " + String(currentVoltage, 2) + "V < 12.0V");
+            Serial.println("   🔒 Manteniendo carga DESACTIVADA por seguridad");
+          }
+        } else {
+          // Mantener en ERROR
+          notaPersonalizada = "ERROR activo: Temp=" + String(currentTemp, 1) + "°C, Volt=" + String(currentVoltage, 2) + "V - CARGA BLOQUEADA";
+          Serial.println("🚨 [ERROR] Condiciones aún críticas - manteniendo sistema protegido");
+        }
+        
+        lastErrorCheck = currentTime;
+      }
       break;
   }
 }
