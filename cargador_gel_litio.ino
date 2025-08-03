@@ -236,6 +236,7 @@ void sendDataToOrangePi() {
   json += "\"calculatedAbsorptionHours\":" + String(calculatedAbsorptionHours) + ",";
   json += "\"accumulatedAh\":" + String(accumulatedAh) + ",";
   json += "\"estimatedSOC\":" + String(getSOCFromVoltage(ina219_2.getBusVoltage_V())) + ",";
+  json += "\"calculatedSOC\":" + String((accumulatedAh / batteryCapacity) * 100.0) + ",";
   json += "\"netCurrent\":" + String(panelToBatteryCurrent - batteryToLoadCurrent) + ",";
   json += "\"factorDivider\":" + String(factorDivider) + ",";
   json += "\"currentBulkHours\":" + String(currentBulkHours) + ",";
@@ -322,10 +323,51 @@ void handleSetCommand(String cmd) {
   // === PARÁMETROS BÁSICOS ===
   if (parameter == "batteryCapacity") {
     if (value > 0 && value <= 1000) {
+      // ✅ CORRECCIÓN: Recalcular SOC antes de cambiar capacidad
+      float oldCapacity = batteryCapacity;
+      float currentStoredEnergy = accumulatedAh; // Energía almacenada actual
+      
+      Serial.println("🔋 [Orange Pi] Cambiando capacidad de batería:");
+      Serial.println("   Capacidad anterior: " + String(oldCapacity, 1) + " Ah");
+      Serial.println("   Energía almacenada: " + String(currentStoredEnergy, 2) + " Ah");
+      Serial.println("   SOC anterior: " + String((currentStoredEnergy / oldCapacity) * 100.0, 1) + "%");
+      
+      // Actualizar capacidad
       batteryCapacity = value;
+      
+      // ✅ RECALCULAR SOC: Mantener la misma energía almacenada
+      // Nuevo SOC = (Energía actual / Nueva capacidad) × 100%
+      float newSOC = (currentStoredEnergy / batteryCapacity) * 100.0;
+      
+      // ✅ VALIDACIÓN: Limitar SOC entre 0% y 110%
+      if (newSOC > 110.0) {
+        newSOC = 110.0;
+        accumulatedAh = (newSOC / 100.0) * batteryCapacity;
+        Serial.println("⚠️ [Orange Pi] SOC limitado a 110% - ajustando energía almacenada");
+      } else if (newSOC < 0.0) {
+        newSOC = 0.0;
+        accumulatedAh = 0.0;
+        Serial.println("⚠️ [Orange Pi] SOC limitado a 0% - ajustando energía almacenada");
+      } else {
+        // SOC válido - mantener energía almacenada actual
+        accumulatedAh = currentStoredEnergy;
+      }
+      
+      Serial.println("   Nueva capacidad: " + String(batteryCapacity, 1) + " Ah");
+      Serial.println("   Energía mantenida: " + String(accumulatedAh, 2) + " Ah");
+      Serial.println("   Nuevo SOC: " + String(newSOC, 1) + "%");
+      
       // Recalcular parámetros dependientes
       absorptionCurrentThreshold_mA = (batteryCapacity * thresholdPercentage) * 10;
       currentLimitIntoFloatStage = absorptionCurrentThreshold_mA / factorDivider;
+      
+      // ✅ ACTUALIZAR maxBulkHours si se usa fuente DC
+      if (useFuenteDC && fuenteDC_Amps > 0) {
+        float oldMaxBulkHours = maxBulkHours;
+        maxBulkHours = batteryCapacity / fuenteDC_Amps;
+        Serial.println("   Tiempo máx. Bulk actualizado: " + String(oldMaxBulkHours, 1) + "h → " + String(maxBulkHours, 1) + "h");
+      }
+      
       success = true;
     }
   }
@@ -423,7 +465,10 @@ void handleSetCommand(String cmd) {
     preferences.begin("charger", false);
     
     // Guardar según el parámetro
-    if (parameter == "batteryCapacity") preferences.putFloat("batteryCap", batteryCapacity);
+    if (parameter == "batteryCapacity") {
+      preferences.putFloat("batteryCap", batteryCapacity);
+      preferences.putFloat("accumulatedAh", accumulatedAh); // ← IMPORTANTE: Guardar SOC corregido
+    }
     else if (parameter == "thresholdPercentage") preferences.putFloat("thresholdPerc", thresholdPercentage);
     else if (parameter == "maxAllowedCurrent") preferences.putFloat("maxCurrent", maxAllowedCurrent);
     else if (parameter == "bulkVoltage") preferences.putFloat("bulkV", bulkVoltage);
@@ -435,8 +480,15 @@ void handleSetCommand(String cmd) {
     
     preferences.end();
     
-    response += parameter + " updated to " + valueStr;
-    notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
+    // Mensaje de respuesta personalizado para batteryCapacity
+    if (parameter == "batteryCapacity") {
+      float finalSOC = (accumulatedAh / batteryCapacity) * 100.0;
+      response += parameter + " updated to " + valueStr + ", SOC recalculated to " + String(finalSOC, 1) + "%";
+      notaPersonalizada = "Capacidad actualizada a " + valueStr + "Ah desde Orange Pi. SOC recalculado: " + String(finalSOC, 1) + "% (" + String(accumulatedAh, 2) + "Ah)";
+    } else {
+      response += parameter + " updated to " + valueStr;
+      notaPersonalizada = "Parámetro " + parameter + " actualizado desde Orange Pi a " + valueStr;
+    }
     
     Serial.println("✅ [Orange Pi] " + response);
     Serial.println("💾 [Orange Pi] Parámetro guardado en Preferences");
