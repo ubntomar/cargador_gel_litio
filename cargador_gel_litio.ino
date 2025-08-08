@@ -1046,30 +1046,24 @@ float calculateAbsorptionTime() {
   return min(calculatedTime, maxAbsorptionHours);
 }
 
-float getSOCFromVoltage(float voltage) {
-  // === CORRECCIÓN: Curva SOC más realista para baterías GEL ===
-  // Basado en voltaje en reposo (sin carga ni descarga activa)
-  
-  if (voltage >= 14.4) {
-    return 100.0; // Voltaje de carga completa
-  } else if (voltage >= 13.8) {
-    return map(voltage, 13.8, 14.4, 95.0, 100.0); // 95-100%
-  } else if (voltage >= 13.2) {
-    return map(voltage, 13.2, 13.8, 80.0, 95.0);  // 80-95%
-  } else if (voltage >= 12.8) {
-    return map(voltage, 12.8, 13.2, 60.0, 80.0);  // 60-80%
-  } else if (voltage >= 12.4) {
-    return map(voltage, 12.4, 12.8, 40.0, 60.0);  // 40-60%
-  } else if (voltage >= 12.0) {
-    return map(voltage, 12.0, 12.4, 20.0, 40.0);  // 20-40%
-  } else if (voltage >= 11.8) {
-    return map(voltage, 11.8, 12.0, 10.0, 20.0);  // 10-20%
-  } else if (voltage >= 11.5) {
-    return map(voltage, 11.5, 11.8, 5.0, 10.0);   // 5-10%
-  } else {
-    return 0.0; // Batería descargada crítica
-  }
+// Interpolación lineal segura para float
+static float fLerp(float x, float x0, float x1, float y0, float y1) {
+  if (x1 == x0) return y0; // evita división por cero
+  return y0 + (x - x0) * (y1 - y0) / (x1 - x0);
 }
+
+float getSOCFromVoltage(float voltage) {
+  if (voltage >= 14.4) return 100.0;
+  else if (voltage >= 13.8) return fLerp(voltage, 13.8, 14.4, 95.0, 100.0);
+  else if (voltage >= 13.2) return fLerp(voltage, 13.2, 13.8, 80.0, 95.0);
+  else if (voltage >= 12.8) return fLerp(voltage, 12.8, 13.2, 60.0, 80.0);
+  else if (voltage >= 12.4) return fLerp(voltage, 12.4, 12.8, 40.0, 60.0);
+  else if (voltage >= 12.0) return fLerp(voltage, 12.0, 12.4, 20.0, 40.0);
+  else if (voltage >= 11.8) return fLerp(voltage, 11.8, 12.0, 10.0, 20.0);
+  else if (voltage >= 11.5) return fLerp(voltage, 11.5, 11.8, 5.0, 10.0);
+  else return 0.0;
+}
+
 
 float getAverageCurrent(Adafruit_INA219 &ina) {
   float totalCurrent = 0;
